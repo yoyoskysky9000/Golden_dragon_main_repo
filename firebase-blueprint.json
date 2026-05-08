@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "User Account",
+      "description": "Stores user account information including their payment plan (subscription vs staking) for running strategies.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "The user's email address" },
+        "planType": { "type": "string", "enum": ["free", "subscription", "staking"], "description": "The user's billing plan" },
+        "stakedAmount": { "type": "number", "description": "Amount of coin staked for gas" },
+        "gasBalance": { "type": "number", "description": "Available gas to run strategies" },
+        "isSellingData": { "type": "boolean", "description": "Whether the user opted in to sell their data" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["planType", "createdAt", "updatedAt"]
+    },
+    "DataListing": {
+      "title": "Data Listing",
+      "description": "A marketplace listing for a user's data or strategy.",
+      "type": "object",
+      "properties": {
+        "sellerId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "currency": { "type": "string", "enum": ["USD", "GAS_COIN"] },
+        "dataSourceType": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "suspended", "sold_out"] },
+        "buyersCount": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["sellerId", "title", "price", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "UserAccount",
+      "description": "User profile with their plan and staking details."
+    },
+    "dataMarketplace/{listingId}": {
+      "schema": "DataListing",
+      "description": "Listings of data or strategies being sold by users."
+    }
+  }
+}

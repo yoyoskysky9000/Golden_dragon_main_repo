@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    
+    // User Account Validation
+    function isValidUserAccount(data) {
+      return data.keys().hasAll(['planType', 'createdAt', 'updatedAt']) &&
+             data.planType in ['free', 'subscription', 'staking'] &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp &&
+             (data.keys().hasAny(['email']) ? data.email is string && data.email.size() <= 256 : true) &&
+             (data.keys().hasAny(['stakedAmount']) ? data.stakedAmount is number : true) &&
+             (data.keys().hasAny(['gasBalance']) ? data.gasBalance is number : true) &&
+             (data.keys().hasAny(['isSellingData']) ? data.isSellingData is bool : true);
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      // You can only create your own account
+      allow create: if isSignedIn() && 
+                       request.auth.uid == userId && 
+                       isValidId(userId) &&
+                       isValidUserAccount(incoming()) &&
+                       incoming().keys().size() <= 7 && // keys limits
+                       incoming().createdAt == request.time &&
+                       incoming().updatedAt == request.time;
+                       
+      // Action: Update Plan
+      function isUpdatePlanAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['planType', 'stakedAmount', 'gasBalance', 'updatedAt']);
+      }
+
+      // Action: Toggle data selling
+      function isToggleSellingAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['isSellingData', 'updatedAt']);
+      }
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidUserAccount(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt == request.time &&
+                       (isUpdatePlanAction() || isToggleSellingAction());
+    }
+
+    // Data Listing Validation
+    function isValidDataListing(data) {
+      return data.keys().hasAll(['sellerId', 'title', 'price', 'status', 'createdAt', 'updatedAt']) &&
+             data.sellerId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             (data.keys().hasAny(['description']) ? data.description is string && data.description.size() <= 1000 : true) &&
+             data.price is number && data.price >= 0 &&
+             (data.keys().hasAny(['currency']) ? data.currency in ['USD', 'GAS_COIN'] : true) &&
+             (data.keys().hasAny(['dataSourceType']) ? data.dataSourceType is string && data.dataSourceType.size() <= 100 : true) &&
+             data.status in ['active', 'suspended', 'sold_out'] &&
+             (data.keys().hasAny(['buyersCount']) ? data.buyersCount is number : true) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    match /dataMarketplace/{listingId} {
+      // Allow any signed-in user to see active listings
+      allow list: if isSignedIn() && resource.data.status == 'active';
+      allow get: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(listingId) &&
+                       isValidDataListing(incoming()) &&
+                       incoming().createdAt == request.time &&
+                       incoming().updatedAt == request.time;
+                       
+      function isUpdateListingStatusAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      }
+      function isUpdateListingDetailsAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'currency', 'updatedAt']);
+      }
+
+      allow update: if isSignedIn() &&
+                       existing().sellerId == request.auth.uid &&
+                       isValidDataListing(incoming()) &&
+                       incoming().sellerId == existing().sellerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt == request.time &&
+                       (isUpdateListingStatusAction() || isUpdateListingDetailsAction());
+
+      allow delete: if isSignedIn() && existing().sellerId == request.auth.uid;
+    }
+  }
+}
