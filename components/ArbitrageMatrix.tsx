@@ -66,7 +66,7 @@ const ArbitrageMatrix: React.FC<ArbitrageMatrixProps> = ({ stocks }) => {
         if (Math.random() > 0.7) {
             const isCrypto = Math.random() > 0.5;
             const log = isCrypto 
-                ? `[AUTO-ARB] Executed cross-exchange path for BTC. Net yield: +${(Math.random() * 0.5 + 0.1).toFixed(2)}%`
+                ? `[AUTO-ARB] Executed cross-chain path for BTC. Net yield: +${(Math.random() * 0.5 + 0.1).toFixed(2)}%`
                 : `[AUTO-ARB] Executed prediction market Dutch-book. Net yield: +${(Math.random() * 2 + 1).toFixed(2)}%`;
             
             setAutoArbLogs(prev => [log, ...prev].slice(0, 5));
@@ -78,7 +78,7 @@ const ArbitrageMatrix: React.FC<ArbitrageMatrixProps> = ({ stocks }) => {
 
   const opportunities = useMemo(() => {
     const ops: ArbitrageOpportunity[] = [];
-    stocks.forEach(stock => {
+    stocks.filter(s => s.assetType === 'crypto').forEach(stock => {
       if (!stock.exchanges) return;
       // Fix: Cast Object.entries to [string, number][] to ensure types are correctly inferred as numbers.
       const exchangeEntries = Object.entries(stock.exchanges) as [string, number][];
@@ -128,7 +128,7 @@ const ArbitrageMatrix: React.FC<ArbitrageMatrixProps> = ({ stocks }) => {
                     <Zap className="w-6 h-6 text-amber-500 fill-amber-500/20" />
                     Arbitrage Matrix
                 </h2>
-                <p className="text-sm text-gray-500">Cross-exchange inefficiencies detected via Dragon Webhooks.</p>
+                <p className="text-sm text-gray-500">Cross-chain and cross-exchange inefficiencies detected via Dragon Webhooks.</p>
             </div>
             <div className="flex gap-4">
                  <button 
@@ -202,7 +202,7 @@ const ArbitrageMatrix: React.FC<ArbitrageMatrixProps> = ({ stocks }) => {
                                     </div>
                                     <div>
                                         <h3 className="font-bold text-gray-200">{op.symbol}</h3>
-                                        <div className="text-[10px] text-gray-500 uppercase font-bold mt-1">Cross-Exchange</div>
+                                        <div className="text-[10px] text-gray-500 uppercase font-bold mt-1">Cross-Chain</div>
                                     </div>
                                 </div>
 
@@ -300,7 +300,7 @@ const ArbitrageMatrix: React.FC<ArbitrageMatrixProps> = ({ stocks }) => {
                 <AlertTriangle className="w-5 h-5" />
             </div>
             <div className="text-xs text-gray-400">
-                <span className="text-amber-500 font-bold">PRO TIP:</span> The Golden Dragon terminal accounts for cross-exchange transfer latency. High spreads may be due to "Network Gaps" or "Wallet Congestion". Verify withdrawal status before execution.
+                <span className="text-amber-500 font-bold">PRO TIP:</span> The Golden Dragon terminal accounts for cross-chain transfer latency. High spreads may be due to "Network Gaps" or "Wallet Congestion". Verify withdrawal status before execution.
             </div>
         </div>
     </div>

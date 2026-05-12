@@ -8,7 +8,7 @@ export interface StockData {
   volume: number;
   history: { time: string; price: number; rsi?: number; sma?: number; kalman?: number }[];
   sector: string;
-  assetType: 'stock' | 'crypto';
+  assetType: 'stock' | 'crypto' | 'option' | 'future';
   description: string;
   exchanges?: Record<string, number>; // symbol -> price on that exchange
   marketCap?: string;
@@ -123,6 +123,20 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   timestamp: number;
+}
+
+export interface AIAgent {
+  id: string;
+  name: string;
+  role: 'Master Strategist' | 'Sector Analyst' | 'Quant Developer' | 'Risk Manager' | 'Data Engineer' | 'Execution Specialist' | 'Prediction Market Sentinel';
+  model: 'gemini-3.1-pro-preview' | 'gemini-3.1-flash' | 'kalshi-tuned-v1' | 'coinbase-tuned-v1' | 'custom-api';
+  trainingDataSources: { id: string; priority: number }[];
+  systemPrompt: string;
+  parentAgentId: string | null; // For hierarchy
+  status: 'idle' | 'training' | 'analyzing' | 'ready' | 'error';
+  accuracyScore: number;
+  lastTrainedAt?: number;
+  trainingProgress?: number;
 }
 
 export interface TradingBotSource {
@@ -266,5 +280,19 @@ export enum AppView {
   DEEP_SEARCH = 'DEEP_SEARCH',
   ACCOUNT = 'ACCOUNT',
   MARKETPLACE = 'MARKETPLACE',
-  PREDICTION_MARKETS = 'PREDICTION_MARKETS'
+  PREDICTION_MARKETS = 'PREDICTION_MARKETS',
+  SWARM = 'SWARM',
+  TASKS = 'TASKS'
+}
+
+export interface AgentTask {
+  id: string;
+  title: string;
+  description: string;
+  assignedAgentId: string | null;
+  deadline: string;
+  status: 'todo' | 'in_progress' | 'completed' | 'failed';
+  createdAt: number;
+  dependencies?: string[];
+  dataSources?: { id: string; priority: number }[];
 }

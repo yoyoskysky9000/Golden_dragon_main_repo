@@ -266,9 +266,14 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
-  const EXCHANGES = ['DragonEx', 'KrakenMock', 'BinanceSim'];
-  
-  // Keep track of current prices for the simulation
+  const CRYPTOS = ['BTC/USD', 'ETH/USD', 'SOL/USD'];
+  const SYMBOL_MAP: Record<string, string> = {
+    'BTC/USD': 'BTC-USD',
+    'ETH/USD': 'ETH-USD',
+    'SOL/USD': 'SOL-USD'
+  };
+  const STOCKS = ['NVDA', 'AAPL', 'ES=F', 'NQ=F'];
+
   let currentPrices: Record<string, number> = {
     'NVDA': 135.50,
     'AAPL': 226.80,
@@ -277,36 +282,83 @@ async function startServer() {
     'SOL-USD': 148.75
   };
 
-  setInterval(() => {
-    const updates = Object.keys(currentPrices).map(symbol => {
-      const isCrypto = symbol.includes('USD');
-      const volatility = isCrypto ? 0.008 : 0.002;
-      const momentum = (Math.random() - 0.5) > 0 ? 0.2 : -0.2;
-      const randomComponent = (Math.random() - 0.5 + (momentum * 0.05));
-      const change = currentPrices[symbol] * randomComponent * volatility * 3;
-      const newPrice = Math.max(0.01, currentPrices[symbol] + change);
-      currentPrices[symbol] = newPrice;
+  const binanceus = new ccxt.binanceus();
+  const kraken = new ccxt.kraken();
+  const coinbase = new ccxt.coinbase();
 
-      const newExchanges: Record<string, number> = {};
-      EXCHANGES.forEach(ex => {
-        const drift = 1 + (Math.random() - 0.5) * 0.001;
-        newExchanges[ex] = newPrice * drift;
-      });
+  const fetchRealPrices = async () => {
+    try {
+      const updates = [];
 
-      return {
-        symbol,
-        price: newPrice,
-        exchanges: newExchanges
-      };
-    });
+      // Fetch Crypto Prices
+      for (const crypto of CRYPTOS) {
+        const symbol = SYMBOL_MAP[crypto];
+        const newExchanges: Record<string, number> = {};
+        
+        let avgPrice = 0;
+        let count = 0;
 
-    const message = JSON.stringify({ type: 'TICK', data: updates });
-    wss.clients.forEach(client => {
-      if (client.readyState === 1) { // WebSocket.OPEN
-        client.send(message);
+        try {
+          const tBinance = await binanceus.fetchTicker(crypto.replace('USD', 'USDT')).catch(() => null);
+          if (tBinance?.last) { newExchanges['BinanceUS'] = tBinance.last; avgPrice += tBinance.last; count++; }
+        } catch (e) {}
+
+        try {
+          const tKraken = await kraken.fetchTicker(crypto).catch(() => null);
+          if (tKraken?.last) { newExchanges['Kraken'] = tKraken.last; avgPrice += tKraken.last; count++; }
+        } catch (e) {}
+
+        try {
+          const tCoinbase = await coinbase.fetchTicker(crypto).catch(() => null);
+          if (tCoinbase?.last) { newExchanges['Coinbase'] = tCoinbase.last; avgPrice += tCoinbase.last; count++; }
+        } catch (e) {}
+
+        if (count > 0) {
+          const newPrice = avgPrice / count;
+          currentPrices[symbol] = newPrice;
+          updates.push({
+            symbol,
+            price: newPrice,
+            exchanges: newExchanges
+          });
+        }
       }
-    });
-  }, 2000);
+
+      // Fetch Stock Prices
+      for (const stock of STOCKS) {
+        try {
+          const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${stock}`);
+          if (r.ok) {
+            const d = await r.json();
+            const yfPrice = d.chart?.result?.[0]?.meta?.regularMarketPrice;
+            if (yfPrice) {
+              currentPrices[stock] = yfPrice;
+              updates.push({
+                symbol: stock,
+                price: yfPrice,
+                exchanges: {} 
+              });
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (updates.length > 0) {
+        const message = JSON.stringify({ type: 'TICK', data: updates });
+        wss.clients.forEach(client => {
+          if (client.readyState === 1) { // WebSocket.OPEN
+             client.send(message);
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching real prices', err);
+    }
+  };
+
+  // Start polling
+  setInterval(fetchRealPrices, 5000);
+  fetchRealPrices(); // Initial fetch
 
 }
 

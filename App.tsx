@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { StockData, PortfolioPosition, AppView, ActiveOrder, TradingBot, CopyTrader } from './types';
+import { StockData, PortfolioPosition, AppView, ActiveOrder, TradingBot, CopyTrader, AIAgent, DataSource, AgentTask } from './types';
 import { generateInitialData, simulateTick, generateMockTraders } from './services/mockMarket';
 import StockChart from './components/StockChart';
 import AIAssistant from './components/AIAssistant';
@@ -22,7 +22,11 @@ import AccountDashboard from './components/AccountDashboard';
 import DataMarketplace from './components/DataMarketplace';
 import PredictionMarketsLab from './components/PredictionMarketsLab';
 import CommandCenterDashboard from './components/CommandCenterDashboard';
+import AgentSwarmArchitect from './components/AgentSwarmArchitect';
+import AgentTasks from './components/AgentTasks';
 import { generateTradingSignal, logSignalToBackend, optimizeStrategy } from './services/geminiService';
+import { motion, AnimatePresence } from 'framer-motion';
+
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -62,10 +66,11 @@ import {
   Fingerprint,
   MessageSquare,
   Store,
-  Crosshair
+  Vote,
+  ListTodo
 } from 'lucide-react';
 
-import { DataSource, SignalLog } from './types';
+import { SignalLog } from './types';
 
 interface Notification {
   id: string;
@@ -94,7 +99,7 @@ function App() {
   const [stocks, setStocks] = useState<StockData[]>(() => generateInitialData());
   const [selectedSymbol, setSelectedSymbol] = useState<string>('NVDA');
   const [sidebarTab, setSidebarTab] = useState<'watchlist' | 'holdings' | 'orders' | 'alerts'>('watchlist');
-  const [isSimConnected, setIsSimConnected] = useState<boolean>(() => localStorage.getItem('OMNITRADE_SIM_CONNECTED') === 'true');
+  const [isSimConnected, setIsSimConnected] = useState<boolean>(false);
   const [portfolio, setPortfolio] = useState<PortfolioPosition[]>(() => {
     if (localStorage.getItem('OMNITRADE_SIM_CONNECTED') !== 'true') return [];
     const saved = localStorage.getItem('OMNITRADE_PORTFOLIO');
@@ -126,6 +131,33 @@ function App() {
     }
     return history;
   };
+
+  const [agents, setAgents] = useState<AIAgent[]>([
+    {
+      id: 'agent_master_0',
+      name: 'OmniTrade Master',
+      role: 'Master Strategist',
+      model: 'gemini-3.1-pro-preview',
+      trainingDataSources: [],
+      systemPrompt: 'You are the Master Strategist. Oversee all subordinate AI Agents, aggregate their insights, and make the final trade execution calls.',
+      parentAgentId: null,
+      status: 'ready',
+      accuracyScore: 94.5,
+      lastTrainedAt: Date.now() - 86400000
+    }
+  ]);
+
+  const [tasks, setTasks] = useState<AgentTask[]>([
+    {
+      id: 'task_1',
+      title: 'Analyze Coinbase Earnings',
+      description: 'Review the latest Q3 earnings report from Coinbase and adjust quant models accordingly.',
+      assignedAgentId: 'agent_master_0',
+      deadline: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+      status: 'todo',
+      createdAt: Date.now()
+    }
+  ]);
 
   const [bots, setBots] = useState<TradingBot[]>(() => {
     const saved = localStorage.getItem('OMNITRADE_BOTS');
@@ -334,9 +366,9 @@ function App() {
         if (stock) {
           resolve({
             ...stock,
-            marketCap: stock.assetType === 'crypto' ? "$850B" : "$2.4T",
-            peRatio: stock.assetType === 'crypto' ? "N/A" : "35.2",
-            dividend: stock.assetType === 'crypto' ? "N/A" : "1.2%",
+            marketCap: stock.assetType === 'crypto' ? "$850B" : (stock.assetType === 'option' || stock.assetType === 'future' ? "N/A" : "$2.4T"),
+            peRatio: stock.assetType === 'crypto' || stock.assetType === 'option' || stock.assetType === 'future' ? "N/A" : "35.2",
+            dividend: stock.assetType === 'crypto' || stock.assetType === 'option' || stock.assetType === 'future' ? "N/A" : "1.2%",
             fiftyTwoWeekHigh: stock.price * 1.3,
             fiftyTwoWeekLow: stock.price * 0.7,
             about: `${stock.name} is a globally recognized asset with significant market presence and technological backing.`
@@ -347,6 +379,10 @@ function App() {
       }, 600); // 600ms artificial delay
     });
   };
+
+  const addNotification = useCallback((title: string, message: string, type: 'success' | 'alert' = 'alert') => {
+      setNotifications(prev => [...prev, { id: Math.random().toString(), title, message, type }]);
+  }, []);
 
   const handleOpenDetails = async (symbol: string) => {
     // Show a loading state if we had a loading spinner, but we can just set it straight away or use placeholder
@@ -397,29 +433,68 @@ function App() {
   }, [portfolio, cashBalance, realizedPL, activeOrders, isSimConnected, bots, copyTraders]);
 
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let currentBackoff = 1000;
+    const MAX_BACKOFF = 30000;
+    let isConnected = false;
+    let isClosing = false; // Prevent logic when explicitly closing on unmount
 
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'TICK' && message.data) {
-          setStocks(currentStocks => simulateTick(currentStocks, message.data));
+    const connect = () => {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        if (!isConnected && currentBackoff > 1000) {
+          addNotification('Connection Restored', 'Successfully reconnected to live data feed.', 'success');
         }
-      } catch (err) {
-        console.error('Failed to parse WebSocket message', err);
-      }
+        isConnected = true;
+        currentBackoff = 1000; // reset
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'TICK' && message.data) {
+            setStocks(currentStocks => simulateTick(currentStocks, message.data));
+          }
+        } catch (err) {
+          console.error('Failed to parse WebSocket message', err);
+        }
+      };
+
+      ws.onerror = (error) => {
+         console.error('WebSocket encountered an error:', error);
+      };
+
+      ws.onclose = () => {
+        if (isClosing) return;
+        
+        if (isConnected) {
+          addNotification('Connection Lost', 'Live data feed disconnected. Attempting to reconnect...', 'alert');
+          isConnected = false;
+        }
+        
+        // Auto-reconnect with exponential backoff
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(() => {
+          currentBackoff = Math.min(currentBackoff * 1.5, MAX_BACKOFF);
+          connect();
+        }, currentBackoff);
+      };
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket connection closed');
-    };
+    connect();
 
     return () => {
-      ws.close();
+      isClosing = true;
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.close();
+      }
     };
-  }, []);
+  }, [addNotification]);
 
   useEffect(() => {
     const fetchSources = async (retries = 3) => {
@@ -451,49 +526,62 @@ function App() {
         if (stock) {
           // Filter data sources based on bot's selection
           const selectedSources = effectiveDataSources.filter(ds => bot.dataSources.some(s => s.id === ds.id));
-          const signal = await generateTradingSignal(bot, stock, selectedSources);
-          if (signal) {
-            await logSignalToBackend(signal);
-            if (signal.signal !== 'neutral') {
-              // Execute trade if confidence is high enough
-              if (signal.confidence > 75) {
-                
-                // Dynamic Kelly Criterion Sizing
-                // f* = p - (q / b)
-                // p = probability of winning (confidence / 100)
-                // q = probability of losing (1 - p)
-                // b = proportion of the bet gained with a win (assume 1:1 risk/reward for simplicity here, so b = 1)
-                const p = signal.confidence / 100;
-                const q = 1 - p;
-                const b = 1; // Assuming 1:1 risk/reward
-                let kellyFraction = p - (q / b);
-                
-                // Apply a "Half-Kelly" for safer risk management
-                kellyFraction = Math.max(0, kellyFraction / 2);
-                
-                // Cap maximum allocation to 10% of total equity to prevent ruin
-                kellyFraction = Math.min(kellyFraction, 0.10);
-                
-                const totalEquity = cashBalance + portfolio.reduce((acc, pos) => {
-                  const s = stocks.find(st => st.symbol === pos.symbol);
-                  return acc + (s ? s.price * pos.shares : 0);
-                }, 0);
+          try {
+            const signal = await generateTradingSignal(bot, stock, selectedSources);
+            if (signal) {
+              await logSignalToBackend(signal);
+              if (signal.signal !== 'neutral') {
+                // Execute trade if confidence is high enough
+                if (signal.confidence > 75) {
+                  
+                  // Dynamic Kelly Criterion Sizing
+                  // f* = p - (q / b)
+                  // p = probability of winning (confidence / 100)
+                  // q = probability of losing (1 - p)
+                  // b = proportion of the bet gained with a win (assume 1:1 risk/reward for simplicity here, so b = 1)
+                  const p = signal.confidence / 100;
+                  const q = 1 - p;
+                  const b = 1; // Assuming 1:1 risk/reward
+                  let kellyFraction = p - (q / b);
+                  
+                  // Apply a "Half-Kelly" for safer risk management
+                  kellyFraction = Math.max(0, kellyFraction / 2);
+                  
+                  // Cap maximum allocation to 10% of total equity to prevent ruin
+                  kellyFraction = Math.min(kellyFraction, 0.10);
+                  
+                  const totalEquity = cashBalance + portfolio.reduce((acc, pos) => {
+                    const s = stocks.find(st => st.symbol === pos.symbol);
+                    return acc + (s ? s.price * pos.shares : 0);
+                  }, 0);
 
-                const targetInvestment = totalEquity * kellyFraction;
-                const sharesToTrade = Math.max(1, Math.floor(targetInvestment / signal.price));
+                  const targetInvestment = totalEquity * kellyFraction;
+                  const sharesToTrade = Math.max(1, Math.floor(targetInvestment / signal.price));
 
-                handlePlaceOrder({
-                  symbol: signal.symbol,
-                  side: signal.signal === 'buy' ? 'buy' : 'sell',
-                  type: 'market',
-                  shares: sharesToTrade,
-                  price: signal.price,
-                  isLive: bot.isLive
-                });
-                
-                addNotification("Kelly Criterion Sizing", `Allocating ${(kellyFraction * 100).toFixed(1)}% of equity based on ${signal.confidence}% confidence.`, 'success');
+                  handlePlaceOrder({
+                    symbol: signal.symbol,
+                    side: signal.signal === 'buy' ? 'buy' : 'sell',
+                    type: 'market',
+                    shares: sharesToTrade,
+                    price: signal.price,
+                    isLive: bot.isLive
+                  });
+                  
+                  addNotification("Kelly Criterion Sizing", `Allocating ${(kellyFraction * 100).toFixed(1)}% of equity based on ${signal.confidence}% confidence.`, 'success');
+                }
               }
             }
+          } catch (err) {
+            console.error("Auto-trading signal generation failed:", err);
+            setBots(currentBots => currentBots.map(b => {
+               if (b.id !== bot.id) return b;
+               return {
+                 ...b,
+                 status: 'error',
+                 errorMessage: err instanceof Error ? err.message : 'Error generating signal'
+               };
+            }));
+            addNotification("Bot Error", `${bot.name} encountered an error during signal generation.`, 'alert');
           }
         }
       }
@@ -576,7 +664,9 @@ function App() {
         // Simulate small PnL changes
         const change = (Math.random() - 0.45) * 5; // Slight positive bias
         const newPnl = bot.pnl + change;
-        const newHistory = [...(bot.performanceHistory || []), { timestamp: Date.now(), pnl: newPnl }];
+        const tradesIncrement = Math.random() > 0.8 ? 1 : 0;
+        const newTrades = bot.trades + tradesIncrement;
+        const newHistory = [...(bot.performanceHistory || []), { timestamp: Date.now(), pnl: newPnl, trades: newTrades }];
         
         // Keep history manageable
         if (newHistory.length > 50) newHistory.shift();
@@ -585,7 +675,7 @@ function App() {
           ...bot,
           pnl: newPnl,
           performanceHistory: newHistory,
-          trades: bot.trades + (Math.random() > 0.8 ? 1 : 0) // Randomly increment trades
+          trades: newTrades
         };
       }));
     }, 3000);
@@ -603,16 +693,17 @@ function App() {
           if (stock) {
             try {
                 const result = await optimizeStrategy(bot, stock, { pnl: bot.pnl, trades: bot.trades });
-                if (result) {
+                if (result && result.suggestions && result.suggestions.length > 0) {
+                  const bestSuggestion = result.suggestions.reduce((prev, current) => (prev.score > current.score) ? prev : current);
                   setBots(currentBots => currentBots.map(b => {
                     if (b.id !== bot.id) return b;
-                    if (result.score > 70) {
+                    if (bestSuggestion.score > 70) {
                       return {
                         ...b,
-                        strategy: result.strategy,
+                        strategy: bestSuggestion.strategy,
                         lastOptimizedAt: Date.now(),
-                        optimizationScore: result.score,
-                        aiDescription: `[Optimized] ${result.reasoning}`
+                        optimizationScore: bestSuggestion.score,
+                        aiDescription: `[Optimized] ${bestSuggestion.reasoning}`
                       };
                     } else {
                       return {
@@ -621,8 +712,8 @@ function App() {
                       };
                     }
                   }));
-                  if (result.score > 70) {
-                    addNotification("Strategy Optimized", `Bot ${bot.name} strategy improved by AI (Score: ${result.score})`, 'success');
+                  if (bestSuggestion.score > 70) {
+                    addNotification("Strategy Optimized", `Bot ${bot.name} strategy improved by AI (Score: ${bestSuggestion.score})`, 'success');
                   }
                 }
             } catch (err) {
@@ -643,9 +734,6 @@ function App() {
     return () => clearInterval(optimizationLoop);
   }, [bots, stocks]);
 
-  const addNotification = (title: string, message: string, type: 'success' | 'alert' = 'alert') => {
-      setNotifications(prev => [...prev, { id: Math.random().toString(), title, message, type }]);
-  };
 
   const handleAddDataSource = async (source: Partial<DataSource>) => {
     try {
@@ -947,7 +1035,21 @@ function App() {
              className={`p-3 rounded-xl transition-all ${activeView === AppView.PREDICTION_MARKETS ? 'bg-rose-900/40 text-rose-400 shadow-lg shadow-rose-500/20' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'}`}
              title="Prediction Markets"
           >
-            <Crosshair className="w-6 h-6 text-rose-500" />
+            <Vote className="w-6 h-6 text-rose-500" />
+          </button>
+          <button 
+             onClick={() => setActiveView(AppView.SWARM)}
+             className={`p-3 rounded-xl transition-all ${activeView === AppView.SWARM ? 'bg-emerald-900/40 text-emerald-400 shadow-lg shadow-emerald-500/20' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'}`}
+             title="AI Swarm Architect"
+          >
+            <BrainCircuit className="w-6 h-6 text-emerald-500" />
+          </button>
+          <button 
+             onClick={() => setActiveView(AppView.TASKS)}
+             className={`p-3 rounded-xl transition-all ${activeView === AppView.TASKS ? 'bg-sky-900/40 text-sky-400 shadow-lg shadow-sky-500/20' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'}`}
+             title="Agent Tasks"
+          >
+            <ListTodo className="w-6 h-6 text-sky-500" />
           </button>
         </nav>
       </aside>
@@ -991,94 +1093,109 @@ function App() {
           />
         )}
 
-        {activeView === AppView.ARBITRAGE ? (
-            <ArbitrageMatrix stocks={stocks} />
-        ) : activeView === AppView.CONNECTIONS ? (
-            <ExchangeConnect onConnect={handleConnectSim} onDisconnect={handleDisconnectSim} />
-        ) : activeView === AppView.SOR ? (
-            <SmartOrderRouter />
-        ) : activeView === AppView.DATA_SOURCES ? (
-            <DataSourcesManager 
-              dataSources={effectiveDataSources}
-              onAddDataSource={handleAddDataSource}
-              onUpdateDataSource={handleUpdateDataSource}
-              onDeleteDataSource={handleDeleteDataSource}
-              onReorderDataSources={handleReorderDataSources}
-            />
-        ) : activeView === AppView.MASTER_BOT ? (
-            <MasterBotView bots={bots} dataSources={effectiveDataSources} />
-        ) : activeView === AppView.STRATEGY_EXPLORER ? (
-            <StrategyExplorer stocks={stocks} />
-        ) : activeView === AppView.ALPHA_DEEP_DIVE ? (
-            <AlphaDeepDive stocks={stocks} onAddBot={(b) => setBots(prev => [...prev, b])} />
-        ) : activeView === AppView.DEEP_SEARCH ? (
-            <DeepSearchAI stocks={stocks} onAddBot={(b) => setBots(prev => [...prev, b])} />
-        ) : activeView === AppView.ACCOUNT ? (
-            <AccountDashboard addNotification={addNotification} />
-        ) : activeView === AppView.MARKETPLACE ? (
-            <DataMarketplace addNotification={addNotification} />
-        ) : activeView === AppView.PREDICTION_MARKETS ? (
-            <PredictionMarketsLab />
-        ) : activeView === AppView.BOTS ? (
-           <BotLab 
-            stocks={stocks} 
-            bots={bots} 
-            dataSources={effectiveDataSources}
-            selectedSymbol={selectedSymbol}
-            onAddBot={(b) => setBots(prev => [...prev, b])} 
-            onDeleteBot={(id) => setBots(prev => prev.filter(b => b.id !== id))} 
-            onToggleBot={(id) => setBots(prev => prev.map(b => b.id === id ? {...b, status: b.status === 'active' ? 'paused' : 'active'} : b))} 
-            onUpdateBot={(updatedBot) => setBots(prev => prev.map(b => b.id === updatedBot.id ? updatedBot : b))}
-            onAddDataSource={handleAddDataSource}
-            onUpdateDataSource={handleUpdateDataSource}
-            onDeleteDataSource={handleDeleteDataSource}
-            onReorderDataSources={handleReorderDataSources}
-            initialOptimizeBot={botToOptimize}
-            onClearOptimizeBot={() => setBotToOptimize(null)}
-            addNotification={addNotification}
-           />
-        ) : activeView === AppView.PLAYGROUND ? (
-            <Playground bots={bots} dataSources={effectiveDataSources} stocks={stocks} />
-        ) : activeView === AppView.ORACLE ? (
-            <OracleSpace />
-        ) : activeView === AppView.BACKTESTING ? (
-            <Backtesting 
-              bots={bots} 
-              stocks={stocks} 
-              onOptimize={(botId) => {
-                const bot = bots.find(b => b.id === botId);
-                if (bot) {
-                  setBotToOptimize(bot);
-                  setActiveView(AppView.BOTS);
-                }
-              }}
-              onUpdateBot={(updatedBot) => setBots(current => current.map(b => b.id === updatedBot.id ? updatedBot : b))}
-            />
-        ) : activeView === AppView.COPY_TRADE ? (
-           <CopyTradeHub traders={copyTraders} onToggleCopy={() => {}} onUpdateTrader={() => {}} />
-        ) : activeView === AppView.DASHBOARD ? (
-             <CommandCenterDashboard 
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeView}
+            initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col relative overflow-y-auto custom-scrollbar"
+          >
+            {activeView === AppView.ARBITRAGE ? (
+                <ArbitrageMatrix stocks={stocks} />
+            ) : activeView === AppView.CONNECTIONS ? (
+                <ExchangeConnect onConnect={handleConnectSim} onDisconnect={handleDisconnectSim} />
+            ) : activeView === AppView.SOR ? (
+                <SmartOrderRouter />
+            ) : activeView === AppView.DATA_SOURCES ? (
+                <DataSourcesManager 
+                  dataSources={effectiveDataSources}
+                  onAddDataSource={handleAddDataSource}
+                  onUpdateDataSource={handleUpdateDataSource}
+                  onDeleteDataSource={handleDeleteDataSource}
+                  onReorderDataSources={handleReorderDataSources}
+                />
+            ) : activeView === AppView.MASTER_BOT ? (
+                <MasterBotView bots={bots} dataSources={effectiveDataSources} />
+            ) : activeView === AppView.STRATEGY_EXPLORER ? (
+                <StrategyExplorer stocks={stocks} />
+            ) : activeView === AppView.ALPHA_DEEP_DIVE ? (
+                <AlphaDeepDive stocks={stocks} onAddBot={(b) => setBots(prev => [...prev, b])} />
+            ) : activeView === AppView.DEEP_SEARCH ? (
+                <DeepSearchAI stocks={stocks} onAddBot={(b) => setBots(prev => [...prev, b])} />
+            ) : activeView === AppView.ACCOUNT ? (
+                <AccountDashboard addNotification={addNotification} />
+            ) : activeView === AppView.MARKETPLACE ? (
+                <DataMarketplace addNotification={addNotification} />
+            ) : activeView === AppView.PREDICTION_MARKETS ? (
+                <PredictionMarketsLab />
+            ) : activeView === AppView.SWARM ? (
+                <AgentSwarmArchitect agents={agents} setAgents={setAgents} dataSources={effectiveDataSources} tasks={tasks} setTasks={setTasks} />
+            ) : activeView === AppView.TASKS ? (
+                <AgentTasks tasks={tasks} setTasks={setTasks} agents={agents} dataSources={effectiveDataSources} />
+            ) : activeView === AppView.BOTS ? (
+               <BotLab 
                 stocks={stocks} 
                 bots={bots} 
-                selectedSymbol={selectedSymbol} 
-                setSelectedSymbol={setSelectedSymbol} 
-                portfolio={portfolio} 
-                cashBalance={cashBalance} 
-                realizedPL={realizedPL}
-                onExecuteTrade={(o) => handlePlaceOrder({...o, shares: o.quantity, isLive: false})}
-                onOpenDetails={handleOpenDetails}
-             />
-        ) : (
-            <div className="flex-1 flex items-center justify-center p-12 text-center bg-gray-950">
-                <div className="bg-gray-900 p-8 rounded-2xl border border-gray-800 max-w-lg w-full relative overflow-hidden shadow-2xl">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-amber-700"></div>
-                    <h2 className="text-2xl font-bold text-white mb-8">Exchange Connections</h2>
-                    <button onClick={handleConnectSim} className={`w-full py-4 rounded-xl font-bold transition-all ${isSimConnected ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg'}`}>
-                        {isSimConnected ? "DRAGON SIM CONNECTED" : "CONNECT TO DRAGON SIM"}
-                    </button>
+                dataSources={effectiveDataSources}
+                selectedSymbol={selectedSymbol}
+                onAddBot={(b) => setBots(prev => [...prev, b])} 
+                onDeleteBot={(id) => setBots(prev => prev.filter(b => b.id !== id))} 
+                onToggleBot={(id) => setBots(prev => prev.map(b => b.id === id ? {...b, status: b.status === 'active' ? 'paused' : 'active'} : b))} 
+                onUpdateBot={(updatedBot) => setBots(prev => prev.map(b => b.id === updatedBot.id ? updatedBot : b))}
+                onAddDataSource={handleAddDataSource}
+                onUpdateDataSource={handleUpdateDataSource}
+                onDeleteDataSource={handleDeleteDataSource}
+                onReorderDataSources={handleReorderDataSources}
+                initialOptimizeBot={botToOptimize}
+                onClearOptimizeBot={() => setBotToOptimize(null)}
+                addNotification={addNotification}
+               />
+            ) : activeView === AppView.PLAYGROUND ? (
+                <Playground bots={bots} dataSources={effectiveDataSources} stocks={stocks} />
+            ) : activeView === AppView.ORACLE ? (
+                <OracleSpace />
+            ) : activeView === AppView.BACKTESTING ? (
+                <Backtesting 
+                  bots={bots} 
+                  stocks={stocks} 
+                  onOptimize={(botId) => {
+                    const bot = bots.find(b => b.id === botId);
+                    if (bot) {
+                      setBotToOptimize(bot);
+                      setActiveView(AppView.BOTS);
+                    }
+                  }}
+                  onUpdateBot={(updatedBot) => setBots(current => current.map(b => b.id === updatedBot.id ? updatedBot : b))}
+                />
+            ) : activeView === AppView.COPY_TRADE ? (
+               <CopyTradeHub traders={copyTraders} onToggleCopy={() => {}} onUpdateTrader={() => {}} />
+            ) : activeView === AppView.DASHBOARD ? (
+                 <CommandCenterDashboard 
+                    stocks={stocks} 
+                    bots={bots} 
+                    selectedSymbol={selectedSymbol} 
+                    setSelectedSymbol={setSelectedSymbol} 
+                    portfolio={portfolio} 
+                    cashBalance={cashBalance} 
+                    realizedPL={realizedPL}
+                    onExecuteTrade={(o) => handlePlaceOrder({...o, shares: o.quantity, isLive: false})}
+                    onOpenDetails={handleOpenDetails}
+                 />
+            ) : (
+                <div className="flex-1 flex items-center justify-center p-12 text-center bg-gray-950">
+                    <div className="bg-gray-900 p-8 rounded-2xl border border-gray-800 max-w-lg w-full relative overflow-hidden shadow-2xl">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-amber-700"></div>
+                        <h2 className="text-2xl font-bold text-white mb-8">Exchange Connections</h2>
+                        <button onClick={handleConnectSim} className={`w-full py-4 rounded-xl font-bold transition-all ${isSimConnected ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg'}`}>
+                            {isSimConnected ? "DRAGON SIM CONNECTED" : "CONNECT TO DRAGON SIM"}
+                        </button>
+                    </div>
                 </div>
-            </div>
-        )}
+            )}
+          </motion.div>
+        </AnimatePresence>
         
         {/* Floating AI Button & Panel */}
         <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">

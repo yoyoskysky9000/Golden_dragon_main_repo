@@ -58,11 +58,15 @@ const AlphaDeepDive: React.FC<AlphaDeepDiveProps> = ({ stocks, onAddBot }) => {
     setAnalysis(result);
     
     if (result) {
-      setTimeout(() => setStep('requesting'), 2000);
+      setStep('researching'); // Wait for user to click next
     } else {
       setStep('idle');
       setLoading(false);
     }
+  };
+
+  const proceedToVerify = () => {
+    setStep('requesting');
   };
 
   const proceedToBacktest = async () => {
@@ -84,7 +88,8 @@ const AlphaDeepDive: React.FC<AlphaDeepDiveProps> = ({ stocks, onAddBot }) => {
 
       const btResult = await backtestStrategy(selectedSymbol, strategy, history);
       setBacktestResult(btResult);
-      setTimeout(() => setStep('complete'), 2000);
+      // Removed setTimeout, user must click to view summary or it auto-completes because we only have a backtest button
+      setStep('complete');
     }
     setLoading(false);
   };
@@ -238,6 +243,17 @@ const AlphaDeepDive: React.FC<AlphaDeepDiveProps> = ({ stocks, onAddBot }) => {
                     </div>
                   ))}
                 </div>
+                
+                {step === 'researching' && (
+                  <div className="flex justify-end mb-8">
+                     <button
+                        onClick={proceedToVerify}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-black text-sm uppercase tracking-tighter flex items-center gap-2 transition-all shadow-lg"
+                      >
+                        Proceed to Data Verification <ArrowRight className="w-4 h-4" />
+                      </button>
+                  </div>
+                )}
 
                 {step === 'requesting' && (
                   <motion.div 

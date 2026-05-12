@@ -6,7 +6,10 @@ const INITIAL_ASSETS: Omit<StockData, 'history'>[] = [
   { symbol: 'AAPL', name: 'Apple Inc.', price: 226.80, change: -1.20, changePercent: -0.53, volume: 32000000, sector: 'Technology', assetType: 'stock', description: 'Global tech leader.' },
   { symbol: 'BTC-USD', name: 'Bitcoin', price: 64250.00, change: 1250.00, changePercent: 1.98, volume: 25000000000, sector: 'Crypto', assetType: 'crypto', description: 'Digital gold.' },
   { symbol: 'ETH-USD', name: 'Ethereum', price: 2645.20, change: -35.50, changePercent: -1.32, volume: 12000000000, sector: 'Crypto', assetType: 'crypto', description: 'Smart contract platform.' },
-  { symbol: 'SOL-USD', name: 'Solana', price: 148.75, change: 4.25, changePercent: 2.94, volume: 3500000000, sector: 'Crypto', assetType: 'crypto', description: 'High-performance blockchain.' }
+  { symbol: 'SOL-USD', name: 'Solana', price: 148.75, change: 4.25, changePercent: 2.94, volume: 3500000000, sector: 'Crypto', assetType: 'crypto', description: 'High-performance blockchain.' },
+  { symbol: 'ES=F', name: 'S&P 500 Futures', price: 5400.25, change: 12.50, changePercent: 0.23, volume: 1200000, sector: 'Equities', assetType: 'future', description: 'E-mini S&P 500 Futures contract.' },
+  { symbol: 'NQ=F', name: 'Nasdaq 100 Futures', price: 18500.50, change: 45.00, changePercent: 0.24, volume: 800000, sector: 'Equities', assetType: 'future', description: 'E-mini Nasdaq 100 Futures contract.' },
+  { symbol: 'NVDA2405C150', name: 'NVDA 150 Call (May)', price: 4.50, change: 0.85, changePercent: 23.2, volume: 150000, sector: 'Options', assetType: 'option', description: 'Call option on NVIDIA.' }
 ];
 
 const EXCHANGES = ['DragonEx', 'KrakenMock', 'BinanceSim'];

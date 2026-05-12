@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { TradingBot, StockData } from '../types';
 import { Play, Activity, TrendingUp, TrendingDown, BarChart3, AlertCircle, Calendar, RefreshCw, Settings } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -333,52 +334,57 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
         {/* Results Area */}
         <div className="lg:col-span-2 space-y-6">
           {result ? (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="space-y-6"
+            >
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Total Return</div>
                   <div className={`text-lg font-bold ${result.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {formatPct(result.totalReturn)}
                   </div>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Win Rate</div>
                   <div className="text-lg font-bold text-white">
                     {result.winRate.toFixed(1)}%
                   </div>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Sharpe Ratio</div>
                   <div className="text-lg font-bold text-indigo-400">
                     {result.sharpeRatio.toFixed(2)}
                   </div>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Sortino Ratio</div>
                   <div className="text-lg font-bold text-indigo-400">
                     {result.sortinoRatio.toFixed(2)}
                   </div>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Max Drawdown</div>
                   <div className="text-lg font-bold text-rose-400">
                     -{result.maxDrawdown.toFixed(2)}%
                   </div>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Max Wins / Losses</div>
                   <div className="text-lg font-bold text-white">
                     {result.maxConsecutiveWins} <span className="text-emerald-500 font-normal">W</span> / {result.maxConsecutiveLosses} <span className="text-rose-500 font-normal">L</span>
                   </div>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 col-span-2 lg:col-span-2 flex items-center justify-between">
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.01 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4 col-span-2 lg:col-span-2 flex items-center justify-between">
                   <div>
                     <div className="text-xs text-gray-500 uppercase font-bold mb-1">Total Trades</div>
                     <div className="text-lg font-bold text-white">
                       {result.totalTrades}
                     </div>
                   </div>
-                </div>
+                </motion.div>
               </div>
 
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
@@ -430,7 +436,7 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
                   </ResponsiveContainer>
                 </div>
               </div>
-            </div>
+            </motion.div>
           ) : (
             <div className="h-full min-h-[400px] bg-gray-900/50 border border-gray-800 border-dashed rounded-xl flex flex-col items-center justify-center text-center p-8">
               <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4">

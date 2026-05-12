@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { StockData, TradingBot, PortfolioPosition, ActiveOrder } from '../types';
 import StockChart from './StockChart';
 import AIAssistant from './AIAssistant';
@@ -18,6 +19,9 @@ interface CommandCenterProps {
 
 const formatMoney = (amount: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+};
+const formatCompactMoney = (amount: number) => {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: "compact", maximumFractionDigits: 1 }).format(amount);
 };
 const formatPct = (pct: number) => {
     return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
@@ -132,8 +136,15 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
             <h3 className="text-[10px] uppercase tracking-widest text-gray-500 font-bold ml-2 mb-2">Live Market Streams</h3>
-            {stocks.map(stock => (
-                <div 
+            {stocks.map((stock, idx) => {
+                const multiplier = stock.assetType === 'crypto' ? 40 : 150;
+                const marketCap = stock.price * stock.volume * multiplier;
+                
+                return (
+                <motion.div 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: idx * 0.05 }}
                   key={stock.symbol} 
                   onClick={() => setSelectedSymbol(stock.symbol)} 
                   className={`p-3 rounded-xl border transition-all cursor-pointer relative overflow-hidden group ${
@@ -149,14 +160,18 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
                         <span className={`font-bold ${selectedSymbol === stock.symbol ? 'text-indigo-300' : 'text-gray-300'}`}>{stock.symbol}</span>
                         <span className="font-mono text-sm text-gray-200">{formatMoney(stock.price)}</span>
                     </div>
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center mb-1">
                         <span className="text-xs text-gray-500 truncate max-w-[120px]">{stock.name}</span>
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${stock.change >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
                             {formatPct(stock.changePercent)}
                         </span>
                     </div>
-                </div>
-            ))}
+                    <div className="flex justify-between items-center">
+                        <span className="text-[10px] text-gray-600">Mkt Cap:</span>
+                        <span className="text-[10px] font-mono text-gray-400">{formatCompactMoney(marketCap)}</span>
+                    </div>
+                </motion.div>
+            )})}
         </div>
       </div>
 
@@ -223,7 +238,12 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
               )}
 
               {/* Bottom Analytics Panel */}
-              <div className="h-48 mt-4 grid grid-cols-4 gap-4">
+              <motion.div 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.4, delay: 0.2 }}
+                className="h-48 mt-4 grid grid-cols-4 gap-4"
+              >
                   {/* AI Prediction Matrix */}
                   <div className="col-span-1 bg-[#0a0a18]/70 border border-indigo-900/30 rounded-xl p-4 relative overflow-hidden backdrop-blur-md">
                       <div className="absolute top-0 right-0 p-4 opacity-5"><BrainCircuit className="w-24 h-24 text-indigo-500" /></div>
@@ -361,7 +381,7 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
                          )}
                       </div>
                   </div>
-              </div>
+              </motion.div>
           </div>
       </div>
       

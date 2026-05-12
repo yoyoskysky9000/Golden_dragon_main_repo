@@ -95,6 +95,36 @@ export const analyzeRSIHindsight = async (stock: StockData, rsiData: number[]): 
   } catch (error) { return "Temporal rift detected."; }
 };
 
+export const getPredictionMarketSentiment = async (stock: StockData): Promise<string> => {
+  if (!process.env.API_KEY) return "API Key missing.";
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const prompt = `
+    ACT AS: "Prediction Market Sentinel".
+    ASSET: ${stock.name} (${stock.symbol})
+    TYPE: ${stock.assetType}
+    PRICE: $${stock.price.toFixed(2)}
+
+    TASK:
+    1. Cross-reference the asset's current trajectory with hypothetical (or known) Polymarket prediction data points.
+    2. Synthesize political event probabilities, macroscopic betting flows, and derivative open interest to create a "Prediction Confidence Score".
+    3. Generate a tactical signal update incorporating these variables.
+    4. Provide actionable insights based on this prediction logic.
+
+    FORMAT: 
+    - Include a Prediction Confidence Score metric (e.g. 84%).
+    - Use terminal-esque formatting.
+    - Be highly analytical and focus on forward-looking probabilities.
+  `;
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: prompt,
+      config: { thinkingConfig: { thinkingBudget: 4096 } }
+    });
+    return response.text || "Prediction Market analysis failed.";
+  } catch (error) { return "Unable to reach oracle."; }
+};
+
 export const getDeepMarketAnalysis = async (stock: StockData): Promise<string> => {
   if (!process.env.API_KEY) return "API Key missing.";
   // Initialize AI client per request for key freshness.
@@ -150,6 +180,44 @@ export const getGeneralMarketNews = async (): Promise<string> => {
   } catch (error) { return "News error."; }
 }
 
+const searchKalshiEventsTool: FunctionDeclaration = {
+  name: 'search_kalshi_events',
+  description: 'Searches for upcoming prediction market events, speakers, tickers, and live stream sources.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: { type: Type.STRING }
+    },
+    required: ['query'],
+  },
+};
+
+const analyzeSpeechPatternsTool: FunctionDeclaration = {
+  name: 'analyze_speech_patterns',
+  description: 'Finds speech patterns in the speaker and precursor words that could lead up to the words that are being traded on.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      speaker: { type: Type.STRING },
+      event: { type: Type.STRING }
+    },
+    required: ['speaker'],
+  },
+};
+
+const liveLipReadTool: FunctionDeclaration = {
+  name: 'live_lip_read',
+  description: 'Lip reads from a live stream by screen sharing live with the AI before the price moves, to get the absolute earliest signal.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      speaker: { type: Type.STRING },
+      source: { type: Type.STRING }
+    },
+    required: ['speaker'],
+  },
+};
+
 const executeTradeTool: FunctionDeclaration = {
   name: 'execute_trade',
   description: 'Executes a buy or sell trade order.',
@@ -170,21 +238,27 @@ export interface ToolCallResponse { text?: string; toolCall?: { name: string; ar
 
 export const chatWithAnalyst = async (history: {role: string, parts: {text: string}[]}[], message: string): Promise<ToolCallResponse> => {
     if (!process.env.API_KEY) return { text: "API Key missing." };
-    // Initialize AI client per request for key freshness.
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3-pro-preview',
             contents: [...history.map(h => ({ role: h.role, parts: h.parts })), { role: 'user', parts: [{ text: message }] }],
             config: {
-                systemInstruction: "You are the 'Golden Dragon Oracle'. Expert trading assistant. If the user asks to execute a trade, you MUST use the execute_trade tool and provide the required parameters (symbol, side, quantity, type, and optionally price).",
-                tools: [{ functionDeclarations: [executeTradeTool] }]
+                systemInstruction: "You are the 'Golden Dragon Oracle'. Expert trading assistant. You can screen share live streams to lip read, analyze speech patterns, search kalshi events, and trade based on them. If the user asks to execute a trade, you MUST use the execute_trade tool and provide the required parameters. ALWAYS explain what you are doing. If you use a tool, synthesize its output naturally for the user.",
+                tools: [{ functionDeclarations: [executeTradeTool, searchKalshiEventsTool, analyzeSpeechPatternsTool, liveLipReadTool] }]
             }
         });
         const functionCalls = response.functionCalls;
-        if (functionCalls && functionCalls.length > 0) return { toolCall: { name: functionCalls[0].name, args: functionCalls[0].args } };
+        if (functionCalls && functionCalls.length > 0) {
+            const call = functionCalls[0];
+            return { text: response.text, toolCall: { name: call.name, args: call.args } };
+        }
         return { text: response.text || "No response." };
-    } catch (error) { return { text: "Connection error." }; }
+    } catch (error) { 
+        console.error(error);
+        return { text: "Connection error." }; 
+    }
 }
 
 export const generateBotStrategy = async (userDescription: string, availableSymbols: string[], riskLevel: string = 'Balanced'): Promise<any> => {
@@ -385,7 +459,7 @@ export const optimizeStrategy = async (
   bot: TradingBot,
   stock: StockData,
   performance: { pnl: number; trades: number }
-): Promise<{ strategy: TradingBot['strategy']; reasoning: string; score: number } | null> => {
+): Promise<{ suggestions: Array<{ name: string; strategy: TradingBot['strategy']; reasoning: string; score: number }> } | null> => {
   if (!process.env.API_KEY) return null;
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -412,14 +486,20 @@ export const optimizeStrategy = async (
     
     TASK:
     1. Analyze if the current strategy is effective.
-    2. Suggest adjustments to the indicator value or condition to improve win rate or risk-adjusted returns (e.g. optimizing for a higher Sharpe ratio).
-    3. Provide an "Optimization Score" (0-100) representing the expected improvement.
+    2. Provide 3 distinct optimization suggestions with varying approaches (e.g., Aggressive, Conservative, Balanced).
+    3. Suggest adjustments to the indicator value or condition to improve win rate or risk-adjusted returns (e.g. optimizing for a higher Sharpe ratio).
+    4. Provide an "Optimization Score" (0-100) representing the expected improvement for each.
     
     OUTPUT JSON ONLY:
     {
-      "strategy": { "indicator": "...", "condition": "...", "value": "...", "action": "..." },
-      "reasoning": "...",
-      "score": 85
+      "suggestions": [
+        {
+          "name": "Conservative Tweak",
+          "strategy": { "indicator": "...", "condition": "...", "value": "...", "action": "..." },
+          "reasoning": "...",
+          "score": 85
+        }
+      ]
     }
   `;
 
@@ -432,28 +512,37 @@ export const optimizeStrategy = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            strategy: {
-              type: Type.OBJECT,
-              properties: {
-                indicator: { type: Type.STRING },
-                condition: { type: Type.STRING },
-                value: { type: Type.STRING },
-                action: { type: Type.STRING },
-                additionalRules: {
-                  type: Type.ARRAY,
-                  items: {
+            suggestions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  strategy: {
                     type: Type.OBJECT,
                     properties: {
                       indicator: { type: Type.STRING },
                       condition: { type: Type.STRING },
-                      value: { type: Type.STRING }
+                      value: { type: Type.STRING },
+                      action: { type: Type.STRING },
+                      additionalRules: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            indicator: { type: Type.STRING },
+                            condition: { type: Type.STRING },
+                            value: { type: Type.STRING }
+                          }
+                        }
+                      }
                     }
-                  }
+                  },
+                  reasoning: { type: Type.STRING },
+                  score: { type: Type.NUMBER }
                 }
               }
-            },
-            reasoning: { type: Type.STRING },
-            score: { type: Type.NUMBER }
+            }
           }
         }
       }
@@ -476,6 +565,10 @@ export const backtestStrategy = async (
   winRate: number; 
   maxDrawdown: number; 
   trades: number;
+  sharpeRatio: number;
+  sortinoRatio: number;
+  maxConsecutiveWins: number;
+  maxConsecutiveLosses: number;
   equityCurve: { timestamp: string; equity: number }[];
   reasoning: string;
 } | null> => {
@@ -490,7 +583,7 @@ export const backtestStrategy = async (
 
     TASK:
     1. Simulate trade executions based on the strategy across this history.
-    2. Calculate key performance metrics: Total Return %, Win Rate %, Max Drawdown %.
+    2. Calculate key performance metrics: Total Return %, Win Rate %, Max Drawdown %, Sharpe Ratio, Sortino Ratio, Max Consecutive Wins, and Max Consecutive Losses.
     3. Generate a hypothetical equity curve data set (10 points).
     4. Provide a "Strategy Verdict" summarizing the performance.
 
@@ -510,6 +603,10 @@ export const backtestStrategy = async (
             winRate: { type: Type.NUMBER },
             maxDrawdown: { type: Type.NUMBER },
             trades: { type: Type.NUMBER },
+            sharpeRatio: { type: Type.NUMBER },
+            sortinoRatio: { type: Type.NUMBER },
+            maxConsecutiveWins: { type: Type.NUMBER },
+            maxConsecutiveLosses: { type: Type.NUMBER },
             equityCurve: {
               type: Type.ARRAY,
               items: {
@@ -700,10 +797,28 @@ Return ONLY a valid JSON object representing the strategy. Do not use markdown b
   }
 };
 
+export const simulateAgentTraining = async (agentId: string, onProgress: (progress: number) => void): Promise<boolean> => {
+  return new Promise((resolve) => {
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += Math.floor(Math.random() * 10) + 5;
+      if (progress >= 100) {
+        progress = 100;
+        clearInterval(interval);
+        onProgress(progress);
+        resolve(true);
+      } else {
+        onProgress(progress);
+      }
+    }, 300);
+  });
+};
+
 export const createAIBot = async (
   description: string,
   symbol: string,
-  riskLevel: 'Conservative' | 'Balanced' | 'Aggressive'
+  riskLevel: 'Conservative' | 'Balanced' | 'Aggressive',
+  selectedSources?: { name: string, type: string }[]
 ): Promise<{
   name: string;
   strategy: TradingBot['strategy'];
@@ -712,16 +827,20 @@ export const createAIBot = async (
   if (!process.env.API_KEY) return null;
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+  const sourcesContext = selectedSources && selectedSources.length > 0 
+    ? `\n    AVAILABLE DATA SOURCES FOR AGGREGATION & CROSS-VALIDATION:\n    ${selectedSources.map(s => `- ${s.name} (${s.type})`).join('\n')}\n    \n    INSTRUCTIONS FOR SIGNAL AGGREGATION: Design this bot's strategy to utilize cross-validation from the above sources.`
+    : '';
+
   const prompt = `
     ACT AS: Advanced Trading Bot Architect.
     ASSET: ${symbol}
     USER REQUEST: "${description}"
-    RISK ARCHITECTURE: ${riskLevel}
+    RISK ARCHITECTURE: ${riskLevel}${sourcesContext}
 
     TASK:
     1. Design a precise technical strategy (indicator, condition, value, action).
-    2. Create a professional name for this bot.
-    3. Write a short description.
+    2. Create a professional name for this bot based on the selected strategies / data sources.
+    3. Write a short description detailing how the bot leverages its data sources to synthesize trading decisions and perform cross-validation.
 
     STRATEGY CONSTRAINTS:
     - Indicator: RSI, MACD, SMA50, EMA20, Bollinger

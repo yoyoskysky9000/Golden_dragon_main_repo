@@ -44,6 +44,19 @@ body {
   background: rgba(5, 217, 232, 0.5);
 }
 
+.glitch-hover {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.glitch-hover:hover {
+  animation: cyber-glitch 0.2s linear infinite;
+  color: var(--neon-cyan);
+  text-shadow: 2px 0 var(--neon-pink), -2px 0 var(--neon-cyan);
+  transform: scale(1.02);
+  z-index: 10;
+}
+
 /* Cyberpunk / Magic Animations */
 
 @keyframes cyber-glitch {
@@ -53,12 +66,6 @@ body {
   60% { transform: translate(2px, 1px) }
   80% { transform: translate(1px, -1px) }
   100% { transform: translate(0) }
-}
-
-.glitch-hover:hover {
-  animation: cyber-glitch 0.2s linear infinite;
-  color: var(--neon-cyan);
-  text-shadow: 2px 0 var(--neon-pink), -2px 0 var(--neon-cyan);
 }
 
 .magic-pulse {

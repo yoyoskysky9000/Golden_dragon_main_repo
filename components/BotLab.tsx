@@ -4,6 +4,7 @@ import { Bot, Plus, Play, Pause, Trash2, Copy, Cpu, Zap, Activity, BrainCircuit,
 import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid, Tooltip } from 'recharts';
 import { StockData, TradingBot, DataSource } from '../types';
 import { generateBotStrategy, optimizeStrategy, createAIBot, spawnHedgeFundBots } from '../services/geminiService';
+import { BacktestModule } from './BacktestModule';
 
 interface BotLabProps {
   stocks: StockData[];
@@ -127,7 +128,7 @@ const BotLab: React.FC<BotLabProps> = ({
   onClearOptimizeBot,
   addNotification
 }) => {
-  const [view, setView] = useState<'list' | 'create'>('list');
+  const [view, setView] = useState<'list' | 'create' | 'backtest'>('list');
   const [creationMode, setCreationMode] = useState<'manual' | 'ai'>('ai');
   
   const [selectedBotForAudit, setSelectedBotForAudit] = useState<TradingBot | null>(null);
@@ -228,7 +229,8 @@ const BotLab: React.FC<BotLabProps> = ({
   
   // Optimization State
   const [optimizingBotId, setOptimizingBotId] = useState<string | null>(null);
-  const [optimizationResult, setOptimizationResult] = useState<{ strategy: TradingBot['strategy'], reasoning: string, score: number, botId: string } | null>(null);
+  const [optimizationResult, setOptimizationResult] = useState<{ suggestions: Array<{ name: string; strategy: TradingBot['strategy']; reasoning: string; score: number }>; botId: string } | null>(null);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(0);
   
   const [backtestingBotId, setBacktestingBotId] = useState<string | null>(null);
 
@@ -260,6 +262,7 @@ const BotLab: React.FC<BotLabProps> = ({
         // Base volatility on bot risk or type
         const volatility = bot.type === 'ai_adaptive' ? 50 : 20;
         
+        let currentTrades = bot.trades;
         for (let i = 0; i < dataPoints; i++) {
             const date = new Date();
             date.setHours(date.getHours() - (dataPoints - i) * 4); // roughly past week
@@ -267,10 +270,12 @@ const BotLab: React.FC<BotLabProps> = ({
             // Random walk with drift
             const change = (Math.random() - 0.45) * volatility;
             currentPnl += change;
+            currentTrades += Math.floor(Math.random() * 2);
             
             history.push({
                 timestamp: date.getTime(),
-                pnl: currentPnl
+                pnl: currentPnl,
+                trades: currentTrades
             });
         }
         
@@ -281,7 +286,7 @@ const BotLab: React.FC<BotLabProps> = ({
         onUpdateBot({
             ...bot,
             pnl: currentPnl,
-            trades: bot.trades + Math.floor(Math.random() * 8) + 2,
+            trades: currentTrades,
             performanceHistory: history,
             backtestMetrics: {
                 totalReturn,
@@ -306,7 +311,7 @@ const BotLab: React.FC<BotLabProps> = ({
     { name: 'Super Trend Follower', indicator: 'SUPER_TREND', condition: 'CROSS_UP', value: 'PRICE', action: 'buy'},
     { name: 'Stoch RSI Overbought', indicator: 'STOCH_RSI', condition: 'GT', value: '80', action: 'sell'},
     { name: 'Parabolic SAR Flip', indicator: 'SAR', condition: 'LT', value: 'PRICE', action: 'buy'},
-    { name: 'AI Custom Signal Combo', indicator: 'CUSTOM_COMBO', condition: 'EQ', value: 'TRUE', action: 'buy'}
+    { name: 'AI Custom Signal Combo', indicator: 'CUSTOM_COMBO', condition: 'GT', value: '0', action: 'buy'}
   ];
 
   const applyManualTemplate = (template: typeof manualStrategyTemplates[0]) => {
@@ -346,20 +351,7 @@ const BotLab: React.FC<BotLabProps> = ({
 
   React.useEffect(() => {
     if (initialOptimizeBot) {
-      setView('create');
-      setCreationMode('manual');
-      setManualConfig({
-        name: `${initialOptimizeBot.name} (Optimized)`,
-        symbol: initialOptimizeBot.symbol,
-        exchange: initialOptimizeBot.exchange || 'Binance',
-        indicator: initialOptimizeBot.strategy.indicator,
-        condition: initialOptimizeBot.strategy.condition,
-        value: initialOptimizeBot.strategy.value,
-        action: initialOptimizeBot.strategy.action,
-        logic: initialOptimizeBot.strategy.logic || 'AND',
-        additionalRules: initialOptimizeBot.strategy.additionalRules || [],
-        selectedSources: initialOptimizeBot.dataSources
-      });
+      handleOptimizeAction(initialOptimizeBot);
       if (onClearOptimizeBot) onClearOptimizeBot();
     }
   }, [initialOptimizeBot, onClearOptimizeBot]);
@@ -388,8 +380,13 @@ const BotLab: React.FC<BotLabProps> = ({
     setIsGenerating(true);
     setGeneratedConfig(null);
     
+    const selectedSourceDetails = manualConfig.selectedSources.map(s => {
+      const ds = dataSources.find(d => d.id === s.id);
+      return ds ? { name: ds.name, type: ds.type } : { name: 'Unknown', type: 'unknown' };
+    });
+
     // We use the new createAIBot function for better name/desc/strategy mapping
-    const result = await createAIBot(aiPrompt, aiSymbol, aiRiskLevel);
+    const result = await createAIBot(aiPrompt, aiSymbol, aiRiskLevel, selectedSourceDetails);
     
     if (result) {
         setGeneratedConfig({ ...result, symbol: aiSymbol });
@@ -488,8 +485,9 @@ const BotLab: React.FC<BotLabProps> = ({
     
     try {
         const result = await optimizeStrategy(bot, stock, performance);
-        if (result) {
-            setOptimizationResult({ ...result, botId: bot.id });
+        if (result && result.suggestions) {
+            setOptimizationResult({ suggestions: result.suggestions, botId: bot.id });
+            setSelectedSuggestionIndex(0);
         }
     } catch (err) {
         onUpdateBot({
@@ -506,16 +504,28 @@ const BotLab: React.FC<BotLabProps> = ({
     if (!optimizationResult) return;
     const bot = bots.find(b => b.id === optimizationResult.botId);
     if (bot) {
+        const suggestion = optimizationResult.suggestions[selectedSuggestionIndex];
         onUpdateBot({
             ...bot,
-            strategy: optimizationResult.strategy,
+            strategy: suggestion.strategy,
             lastOptimizedAt: Date.now(),
-            optimizationScore: optimizationResult.score
+            optimizationScore: suggestion.score
         });
     }
     setOptimizationResult(null);
   };
 
+
+  if (view === 'backtest') {
+      return (
+          <BacktestModule 
+             bots={bots} 
+             dataSources={dataSources} 
+             stocks={stocks} 
+             onClose={() => setView('list')} 
+          />
+      );
+  }
 
   if (view === 'create') {
       return (
@@ -600,11 +610,13 @@ const BotLab: React.FC<BotLabProps> = ({
                                   <div className="mb-8">
                                       <div className="flex justify-between items-end mb-2">
                                           <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest">Behavioral Prompt</label>
-                                          <span className="text-[10px] text-gray-500">Describe your strategy</span>
+                                          <span className="text-[10px] text-gray-500 font-mono">
+                                              {aiPrompt.length} / 1000
+                                          </span>
                                       </div>
                                       <textarea 
                                           value={aiPrompt}
-                                          onChange={(e) => setAiPrompt(e.target.value)}
+                                          onChange={(e) => setAiPrompt(e.target.value.slice(0, 1000))}
                                           placeholder="e.g. A moderate risk bot that buys Bitcoin on RSI oversold and sells on a 3% bounce..."
                                           className="w-full h-32 bg-gray-900 border border-gray-800 rounded-xl p-4 text-sm text-gray-200 focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all mb-3"
                                       />
@@ -626,17 +638,37 @@ const BotLab: React.FC<BotLabProps> = ({
                                       </div>
                                   </div>
 
-                                  <div className="mb-8">
-                                      <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-3 text-center">Risk Configuration</label>
-                                      <select 
-                                         value={aiRiskLevel}
-                                         onChange={e => setAiRiskLevel(e.target.value as 'Conservative' | 'Balanced' | 'Aggressive')}
-                                         className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
-                                      >
-                                          <option value="Conservative">Conservative</option>
-                                          <option value="Balanced">Balanced</option>
-                                          <option value="Aggressive">Aggressive</option>
-                                      </select>
+                                  <div className="grid grid-cols-2 gap-6 mb-8">
+                                      <div>
+                                          <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-3 text-center">Risk Configuration</label>
+                                          <select 
+                                             value={aiRiskLevel}
+                                             onChange={e => setAiRiskLevel(e.target.value as 'Conservative' | 'Balanced' | 'Aggressive')}
+                                             className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                                          >
+                                              <option value="Conservative">Conservative</option>
+                                              <option value="Balanced">Balanced</option>
+                                              <option value="Aggressive">Aggressive</option>
+                                          </select>
+                                      </div>
+                                      <div>
+                                          <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-3 text-center" title="Enable complex signal aggregation and cross-validation">Data Sources for Signal Aggregation</label>
+                                          <div className="bg-gray-900 border border-gray-800 rounded-xl p-2 max-h-32 overflow-y-auto custom-scrollbar flex flex-col gap-1">
+                                              {dataSources.map(ds => {
+                                                  const isSelected = manualConfig.selectedSources.some(s => s.id === ds.id);
+                                                  return (
+                                                      <button
+                                                          key={ds.id}
+                                                          onClick={() => handleSourceToggle(ds.id)}
+                                                          className={`text-left px-3 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between ${isSelected ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-gray-400 hover:bg-gray-800'}`}
+                                                      >
+                                                          <span className="font-bold">{ds.name}</span>
+                                                          <span className="text-[9px] uppercase">{ds.type}</span>
+                                                      </button>
+                                                  )
+                                              })}
+                                          </div>
+                                      </div>
                                   </div>
 
                                   <button 
@@ -1612,42 +1644,45 @@ const BotLab: React.FC<BotLabProps> = ({
                   </div>
                   
                   <div className="p-6 space-y-6">
-                      <div className="flex items-center justify-between bg-indigo-900/10 border border-indigo-500/20 rounded-xl p-4">
-                          <div>
-                              <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1">Improvement Score</div>
-                              <div className="text-3xl font-black text-indigo-500 font-mono">+{optimizationResult.score}</div>
-                          </div>
-                          <div className="text-right">
-                              <TrendingUp className="w-8 h-8 text-indigo-500 opacity-20" />
+                      <div className="space-y-4">
+                          <h4 className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">Select Optimization Path</h4>
+                          <div className="flex flex-col gap-3">
+                              {optimizationResult.suggestions && optimizationResult.suggestions.map((suggestion, idx) => (
+                                  <button
+                                      key={idx}
+                                      onClick={() => setSelectedSuggestionIndex(idx)}
+                                      className={`text-left p-4 rounded-xl border transition-all ${
+                                          selectedSuggestionIndex === idx
+                                              ? 'bg-indigo-500/10 border-indigo-500/50'
+                                              : 'bg-gray-950 border-gray-800 hover:border-gray-700'
+                                      }`}
+                                  >
+                                      <div className="flex justify-between items-center mb-2">
+                                          <div className={`text-sm font-bold ${selectedSuggestionIndex === idx ? 'text-indigo-400' : 'text-gray-300'}`}>
+                                              {suggestion.name || 'Optimization Suggestion'}
+                                          </div>
+                                          <div className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded">
+                                              Score: +{suggestion.score}
+                                          </div>
+                                      </div>
+                                      <div className="text-xs font-mono text-gray-400">
+                                          {suggestion.strategy.indicator} {suggestion.strategy.condition} {suggestion.strategy.value}
+                                      </div>
+                                  </button>
+                              ))}
                           </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      {optimizationResult.suggestions && optimizationResult.suggestions[selectedSuggestionIndex] && (
                           <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                              <div className="text-[10px] font-bold text-gray-600 uppercase mb-2">Current Strategy</div>
-                              <div className="text-xs font-mono text-gray-400 break-words">
-                                  {(() => {
-                                      const bot = bots.find(b => b.id === optimizationResult.botId);
-                                      return bot ? `${bot.strategy.indicator} ${bot.strategy.condition} ${bot.strategy.value}` : 'N/A';
-                                  })()}
+                              <div className="text-[10px] font-bold text-gray-600 uppercase mb-2 flex items-center gap-1.5">
+                                  <Sparkles className="w-3 h-3 text-amber-500" /> AI Reasoning
                               </div>
+                              <p className="text-xs text-gray-400 leading-relaxed font-mono">
+                                  {optimizationResult.suggestions[selectedSuggestionIndex].reasoning}
+                              </p>
                           </div>
-                          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4">
-                              <div className="text-[10px] font-bold text-indigo-400 uppercase mb-2">Optimized Strategy</div>
-                              <div className="text-xs font-mono text-white break-words">
-                                  {optimizationResult.strategy.indicator} {optimizationResult.strategy.condition} {optimizationResult.strategy.value}
-                              </div>
-                          </div>
-                      </div>
-
-                      <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                          <div className="text-[10px] font-bold text-gray-600 uppercase mb-2 flex items-center gap-1.5">
-                              <Sparkles className="w-3 h-3 text-amber-500" /> AI Reasoning
-                          </div>
-                          <p className="text-xs text-gray-400 leading-relaxed font-mono">
-                              {optimizationResult.reasoning}
-                          </p>
-                      </div>
+                      )}
 
                       <div className="flex gap-3 pt-2">
                           <button 
@@ -1658,9 +1693,9 @@ const BotLab: React.FC<BotLabProps> = ({
                           </button>
                           <button 
                               onClick={applyOptimization}
-                              className="flex-2 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2 transition-all"
+                              className="flex-2 py-3 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2 transition-all"
                           >
-                              Save Changes <ArrowRight className="w-4 h-4" />
+                              Save Selected <ArrowRight className="w-4 h-4" />
                           </button>
                       </div>
                   </div>

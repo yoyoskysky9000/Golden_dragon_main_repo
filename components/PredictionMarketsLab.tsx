@@ -100,14 +100,13 @@ const PredictionMarketsLab: React.FC<PredictionMarketsLabProps> = () => {
     React.useEffect(() => {
         const fetchRealMarkets = async () => {
             try {
-                // Fetch from Polymarket via proxy
-                const res = await fetch('/api/prediction-markets/polymarket');
+                const res = await fetch('https://gamma-api.polymarket.com/events?closed=false&limit=5');
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.data && Array.isArray(data.data)) {
-                        const parsedMarkets: PredictionMarket[] = data.data.slice(0, 5).map((evt: any) => {
-                            const pYes = evt.markets && evt.markets[0] ? parseFloat(JSON.parse(evt.markets[0].outcomePrices)[0]) : 0.5;
-                            const pNo = evt.markets && evt.markets[0] ? parseFloat(JSON.parse(evt.markets[0].outcomePrices)[1]) : 0.5;
+                    if (data && Array.isArray(data)) {
+                        const parsedMarkets: PredictionMarket[] = data.slice(0, 5).map((evt: any) => {
+                            const pYes = evt.markets && evt.markets[0] && evt.markets[0].outcomePrices ? parseFloat(JSON.parse(evt.markets[0].outcomePrices)[0] || "0.5") : 0.5;
+                            const pNo = evt.markets && evt.markets[0] && evt.markets[0].outcomePrices ? parseFloat(JSON.parse(evt.markets[0].outcomePrices)[1] || "0.5") : 0.5;
                             
                             return {
                                 id: evt.id,
@@ -133,6 +132,56 @@ const PredictionMarketsLab: React.FC<PredictionMarketsLabProps> = () => {
         };
         fetchRealMarkets();
     }, []);
+
+    // Bot Active Trading Loop
+    React.useEffect(() => {
+        const interval = setInterval(() => {
+            setBots(currentBots => currentBots.map(bot => {
+                if (bot.status !== 'active') return bot;
+                
+                const market = realMarkets.find(m => m.id === bot.marketId);
+                if (!market) return bot;
+                
+                let tradeMade = false;
+                let simulatedPnl = 0;
+
+                bot.targetPlatforms.forEach(platform => {
+                     const platformData = market.platforms[platform as keyof PredictionMarket['platforms']];
+                     if (platformData) {
+                         // Simulate agent logic: compare platform price to estimated real probability
+                         const gap = Math.abs(platformData.yesPrice - market.probabilityYes);
+                         
+                         // If gap exists, the agent exploits arbitrage or mispricing
+                         if (gap > 0.02) {
+                             tradeMade = true;
+                             // Simulated profit biased positive
+                             const gain = (Math.random() * 5) - 0.5; 
+                             simulatedPnl += gain;
+                         }
+                     }
+                });
+
+                if (tradeMade) {
+                    const newTotalPnl = bot.pnl + simulatedPnl;
+                    const newConfidence = Math.min(100, Math.max(0, bot.confidence + (simulatedPnl > 0 ? 1 : -2)));
+                    return {
+                        ...bot,
+                        pnl: newTotalPnl,
+                        trades: bot.trades + 1,
+                        confidence: newConfidence,
+                        performanceHistory: [
+                            ...bot.performanceHistory.slice(-19), 
+                            { timestamp: Date.now(), pnl: newTotalPnl }
+                        ]
+                    };
+                }
+                
+                return bot;
+            }));
+        }, 6000); // Run trading simulation loop every 6 seconds
+
+        return () => clearInterval(interval);
+    }, [realMarkets]);
 
     const handleSaveApiKeys = () => {
         localStorage.setItem('pm_polymarket_key', apiKeys.polymarketKey);
@@ -195,6 +244,17 @@ const PredictionMarketsLab: React.FC<PredictionMarketsLabProps> = () => {
             alert('Failed to connect to API Gateway.');
             setIsDeploying(false);
         }
+    };
+
+    const toggleBotStatus = (botId: string) => {
+        setBots(prev => prev.map(bot => {
+            if (bot.id === botId) {
+                // Determine new status. If "learning" or "paused", switch to "active". If "active", switch to "paused".
+                const newStatus = bot.status === 'active' ? 'paused' : 'active';
+                return { ...bot, status: newStatus };
+            }
+            return bot;
+        }));
     };
 
     return (
@@ -421,8 +481,11 @@ const PredictionMarketsLab: React.FC<PredictionMarketsLabProps> = () => {
                                         </div>
 
                                         <div className="flex gap-2">
-                                            <button className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex justify-center items-center gap-2">
-                                                <Pause className="w-3 h-3" /> Pause
+                                            <button 
+                                                onClick={() => toggleBotStatus(bot.id)}
+                                                className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex justify-center items-center gap-2"
+                                            >
+                                                {bot.status === 'active' ? <><Pause className="w-3 h-3" /> Pause</> : <><Play className="w-3 h-3" /> Resume</>}
                                             </button>
                                             <button className="flex-1 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/30 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex justify-center items-center gap-2">
                                                 <TrendingUp className="w-3 h-3" /> Optimize

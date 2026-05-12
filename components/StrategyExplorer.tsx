@@ -316,7 +316,7 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
 
             {backtestResult ? (
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                   <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Return</div>
                     <div className={`text-xl font-bold font-mono ${backtestResult.totalReturn >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
@@ -339,6 +339,33 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Trade Count</div>
                     <div className="text-xl font-bold font-mono text-amber-400">
                       {backtestResult.trades}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                  <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Sharpe Ratio</div>
+                    <div className="text-xl font-bold font-mono text-white">
+                      {backtestResult.sharpeRatio?.toFixed(2) || '0.00'}
+                    </div>
+                  </div>
+                  <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Sortino Ratio</div>
+                    <div className="text-xl font-bold font-mono text-white">
+                      {backtestResult.sortinoRatio?.toFixed(2) || '0.00'}
+                    </div>
+                  </div>
+                  <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Max Cons. Wins</div>
+                    <div className="text-xl font-bold font-mono text-emerald-400">
+                      {backtestResult.maxConsecutiveWins || '0'}
+                    </div>
+                  </div>
+                  <div className="bg-gray-950 border border-gray-800 rounded-2xl p-4">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Max Cons. Losses</div>
+                    <div className="text-xl font-bold font-mono text-rose-400">
+                      {backtestResult.maxConsecutiveLosses || '0'}
                     </div>
                   </div>
                 </div>
