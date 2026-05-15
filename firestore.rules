@@ -22,7 +22,9 @@ service cloud.firestore {
              (data.keys().hasAny(['email']) ? data.email is string && data.email.size() <= 256 : true) &&
              (data.keys().hasAny(['stakedAmount']) ? data.stakedAmount is number : true) &&
              (data.keys().hasAny(['gasBalance']) ? data.gasBalance is number : true) &&
-             (data.keys().hasAny(['isSellingData']) ? data.isSellingData is bool : true);
+             (data.keys().hasAny(['isSellingData']) ? data.isSellingData is bool : true) &&
+             (data.keys().hasAny(['mfaEnabled']) ? data.mfaEnabled is bool : true) &&
+             (data.keys().hasAny(['mfaSecret']) ? data.mfaSecret is string && data.mfaSecret.size() <= 256 : true);
     }
 
     match /users/{userId} {
@@ -32,7 +34,7 @@ service cloud.firestore {
                        request.auth.uid == userId && 
                        isValidId(userId) &&
                        isValidUserAccount(incoming()) &&
-                       incoming().keys().size() <= 7 && // keys limits
+                       incoming().keys().size() <= 9 && // keys limits
                        incoming().createdAt == request.time &&
                        incoming().updatedAt == request.time;
                        
@@ -46,12 +48,17 @@ service cloud.firestore {
         return incoming().diff(existing()).affectedKeys().hasOnly(['isSellingData', 'updatedAt']);
       }
 
+      // Action: Update MFA
+      function isUpdateMfaAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['mfaEnabled', 'mfaSecret', 'updatedAt']);
+      }
+
       allow update: if isSignedIn() &&
                        request.auth.uid == userId &&
                        isValidUserAccount(incoming()) &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().updatedAt == request.time &&
-                       (isUpdatePlanAction() || isToggleSellingAction());
+                       (isUpdatePlanAction() || isToggleSellingAction() || isUpdateMfaAction());
     }
 
     // Data Listing Validation

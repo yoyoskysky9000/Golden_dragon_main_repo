@@ -31,6 +31,7 @@ async function startServer() {
     { id: '5', name: 'Fed Audio Transcripts', type: 'ai_processed', status: 'connected', lastData: 'Powell: "Monitoring inflation closely"', priority: 90, dependencies: [] },
     { id: '6', name: 'Nansen On-Chain Flows', type: 'external_api', status: 'connected', lastData: 'Whale moving 5000 ETH to Binance', priority: 85, dependencies: [] },
     { id: '7', name: 'Flashbots MEV Mempool', type: 'realtime', status: 'connected', lastData: 'Detecting sandwich attack on UNI', priority: 95, dependencies: [] },
+    { id: '8', name: 'API Health Monitor', type: 'realtime', status: 'connected', lastData: 'All feeds operational', priority: 99, dependencies: [] },
   ];
 
   const bots: any[] = [];
@@ -247,7 +248,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static(path.join(process.cwd(), "dist")));
-    app.get("*", (req, res) => {
+    app.get("*all", (req, res) => {
       res.sendFile(path.join(process.cwd(), "dist/index.html"));
     });
   }

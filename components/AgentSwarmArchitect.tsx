@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Network, BrainCircuit, Database, Cpu, Plus, X, 
   Trash2, Play, GitMerge, FileText, CheckCircle2, ChevronRight, Activity, 
-  Settings, Loader2
+  Settings, Loader2, Pause, RotateCcw
 } from 'lucide-react';
 import { AIAgent, DataSource, AgentTask } from '../types';
 import { simulateAgentTraining } from '../services/geminiService';
+import SwarmGraph from './SwarmGraph';
 
 interface Props {
   agents: AIAgent[];
@@ -20,6 +21,10 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
   const [isSwarmModeActive, setIsSwarmModeActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [viewMode, setViewMode] = useState<'agents' | 'taskGraph'>('agents');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  const selectedTask = tasks.find(t => t.id === selectedTaskId);
+  
   const [newAgent, setNewAgent] = useState<Partial<AIAgent>>({
     name: '',
     role: 'Sector Analyst',
@@ -99,32 +104,54 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
     });
   };
 
-  const handleTrainAgent = async (agentId: string) => {
-    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'training', trainingProgress: 0 } : a));
-    
-    // Simulate training process that could use the Kalshi or Coinbase datasets
-    const finishTraining = await simulateAgentTraining(agentId, (progress) => {
-      setAgents(prev => prev.map(a => a.id === agentId ? { ...a, trainingProgress: progress } : a));
-    });
+  // Training loop
+  useEffect(() => {
+    const hasTraining = agents.some(a => a.status === 'training');
+    if (!hasTraining) return;
 
-    setAgents(prev => prev.map(a => {
-      if (a.id === agentId) {
-        let accuracyBoost = Math.random() * 5;
-        // Formulate a data source improvement factor
-        if (a.trainingDataSources && a.trainingDataSources.length > 0) {
-           const factor = a.trainingDataSources.reduce((sum, ds) => sum + (ds.priority / 100), 0);
-           accuracyBoost += factor * 2; // Extra boost for having high priority data sources
-        }
-        return { 
-          ...a, 
-          status: 'ready', 
-          trainingProgress: 100,
-          accuracyScore: Math.min(99.9, a.accuracyScore + accuracyBoost),
-          lastTrainedAt: Date.now()
-        };
-      }
-      return a;
-    }));
+    const interval = setInterval(() => {
+      setAgents(prev => {
+        let changed = false;
+        const next = prev.map(a => {
+          if (a.status !== 'training') return a;
+          changed = true;
+          let progress = (a.trainingProgress || 0) + (Math.random() * 2 + 0.5); // avg 1.5% per 500ms -> 3% per sec -> 33s total
+          const estTime = Math.max(0, Math.ceil((100 - progress) / 3)); 
+          
+          if (progress >= 100) {
+             let accuracyBoost = (Math.random() * 5);
+             if (a.trainingDataSources && a.trainingDataSources.length > 0) {
+                const factor = a.trainingDataSources.reduce((sum, ds) => sum + (ds.priority / 100), 0);
+                accuracyBoost += factor * 2;
+             }
+             return { 
+               ...a, 
+               status: 'ready', 
+               trainingProgress: 100,
+               estimatedTimeRemaining: 0,
+               accuracyScore: Math.min(99.9, a.accuracyScore + accuracyBoost),
+               lastTrainedAt: Date.now()
+             };
+          }
+          return { ...a, trainingProgress: progress, estimatedTimeRemaining: estTime };
+        });
+        return changed ? next : prev;
+      });
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [agents.some(a => a.status === 'training')]);
+
+  const handleStartTraining = (agentId: string) => {
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'training', trainingProgress: a.trainingProgress || 0 } : a));
+  };
+
+  const handlePauseTraining = (agentId: string) => {
+    setAgents(prev => prev.map(a => a.id === agentId && a.status === 'training' ? { ...a, status: 'paused' } : a));
+  };
+
+  const handleResetTraining = (agentId: string) => {
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'idle', trainingProgress: 0, estimatedTimeRemaining: 0 } : a));
   };
 
   // Build tree organization
@@ -164,35 +191,71 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
                   <div className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
                     agent.status === 'ready' ? 'bg-emerald-500/20 text-emerald-400' :
                     agent.status === 'training' ? 'bg-amber-500/20 text-amber-400' :
+                    agent.status === 'paused' ? 'bg-orange-500/20 text-orange-400' :
                     'bg-gray-700 text-gray-400'
                   }`}>
                     {agent.status}
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleTrainAgent(agent.id); }}
-                    disabled={agent.status === 'training'}
-                    className="flex justify-center items-center px-2 py-1 gap-1 rounded bg-emerald-600/20 hover:bg-emerald-500/40 text-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 transition-colors text-[10px] font-bold uppercase tracking-wider"
-                    title="Train Agent"
-                  >
-                    {agent.status === 'training' ? (
-                      <><Loader2 className="w-3 h-3 animate-spin" /> Tuning</>
-                    ) : (
-                      <><Play className="w-3 h-3" /> Train Agent</>
-                    )}
-                  </button>
+                  
+                  <div className="flex gap-1">
+                    {(agent.status === 'idle' || agent.status === 'ready') ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleStartTraining(agent.id); }}
+                        className="flex justify-center items-center p-1 rounded bg-emerald-600/20 hover:bg-emerald-500/40 text-emerald-500 transition-colors"
+                        title="Train Agent"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                      </button>
+                    ) : agent.status === 'training' ? (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handlePauseTraining(agent.id); }}
+                          className="flex justify-center items-center p-1 rounded bg-amber-600/20 hover:bg-amber-500/40 text-amber-500 transition-colors"
+                          title="Pause Training"
+                        >
+                          <Pause className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleResetTraining(agent.id); }}
+                          className="flex justify-center items-center p-1 rounded bg-gray-600/20 hover:bg-gray-500/40 text-gray-400 transition-colors"
+                          title="Reset Training"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : agent.status === 'paused' ? (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleStartTraining(agent.id); }}
+                          className="flex justify-center items-center p-1 rounded bg-emerald-600/20 hover:bg-emerald-500/40 text-emerald-500 transition-colors"
+                          title="Resume Training"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleResetTraining(agent.id); }}
+                          className="flex justify-center items-center p-1 rounded bg-gray-600/20 hover:bg-gray-500/40 text-gray-400 transition-colors"
+                          title="Reset Training"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
-              {agent.status === 'training' && agent.trainingProgress !== undefined && (
+              {(agent.status === 'training' || agent.status === 'paused') && agent.trainingProgress !== undefined && (
                 <div className="mt-2">
                   <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-full transition-all duration-300"
+                      className={`h-full rounded-full transition-all duration-300 ${agent.status === 'paused' ? 'bg-gray-500' : 'bg-gradient-to-r from-amber-500 to-amber-400'}`}
                       style={{ width: `${agent.trainingProgress}%` }}
                     />
                   </div>
-                  <div className="text-[9px] text-gray-400 text-right mt-1 font-mono">
-                    Training {agent.trainingProgress.toFixed(0)}%
+                  <div className="flex justify-between text-[9px] text-gray-400 mt-1 font-mono">
+                    <span>{agent.status === 'paused' ? 'Paused' : agent.estimatedTimeRemaining && agent.estimatedTimeRemaining > 0 ? `~${agent.estimatedTimeRemaining}s left` : 'Finalizing...'}</span>
+                    <span>{agent.trainingProgress.toFixed(0)}%</span>
                   </div>
                 </div>
               )}
@@ -205,152 +268,6 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
     );
   };
 
-  // Topological grouping for tasks
-  const renderTaskGraph = () => {
-    if (!tasks || tasks.length === 0) {
-      return (
-        <div className="flex-1 h-full flex items-center justify-center flex-col text-gray-500 bg-gray-900 border-l border-gray-800">
-          <GitMerge className="w-16 h-16 text-gray-800 mb-4" />
-          <div className="text-lg font-bold text-gray-600">No Tasks Discovered</div>
-          <div className="text-sm">Switch to the Tasks view and create some execution steps.</div>
-        </div>
-      );
-    }
-
-    // Calculate depths
-    const depths = new Map<string, number>();
-    const getDepth = (id: string, visited: Set<string> = new Set()): number => {
-      if (depths.has(id)) return depths.get(id)!;
-      if (visited.has(id)) return 0; // circular dependency safe
-      visited.add(id);
-
-      const task = tasks.find(t => t.id === id);
-      if (!task || !task.dependencies || task.dependencies.length === 0) {
-        depths.set(id, 0);
-        return 0;
-      }
-
-      let maxDep = 0;
-      for (const dep of task.dependencies) {
-        maxDep = Math.max(maxDep, getDepth(dep, visited));
-      }
-      const d = maxDep + 1;
-      depths.set(id, d);
-      return d;
-    };
-
-    tasks.forEach(t => getDepth(t.id));
-
-    // Group by depth
-    const layers: AgentTask[][] = [];
-    let maxDepth = -1;
-    depths.forEach((d) => { if (d > maxDepth) maxDepth = d; });
-    for (let i = 0; i <= maxDepth; i++) {
-        layers.push(tasks.filter(t => depths.get(t.id) === i));
-    }
-
-    const NODE_WIDTH = 250;
-    const NODE_HEIGHT = 100;
-    const X_GAP = 100;
-    const Y_GAP = 50;
-
-    // Build positions
-    const positions = new Map<string, {x: number, y: number}>();
-    layers.forEach((layer, layerIndex) => {
-        const x = layerIndex * (NODE_WIDTH + X_GAP) + 50;
-        layer.forEach((task, taskIndex) => {
-            const y = taskIndex * (NODE_HEIGHT + Y_GAP) + 50;
-            positions.set(task.id, { x, y });
-        });
-    });
-
-    const totalWidth = (maxDepth + 1) * (NODE_WIDTH + X_GAP) + 100;
-    const totalHeight = Math.max(...layers.map(l => l.length)) * (NODE_HEIGHT + Y_GAP) + 100;
-
-    return (
-        <div className="flex-1 relative overflow-auto custom-scrollbar p-8 bg-gray-900 border-l border-gray-800">
-            <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                <GitMerge className="w-5 h-5 text-purple-400" /> Swarm Execution Flow (DAG)
-            </h3>
-            <div style={{ width: Math.max(totalWidth, 800), height: Math.max(totalHeight, 600), position: 'relative' }}>
-                <svg className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-                    {tasks.map(task => {
-                        const targetPos = positions.get(task.id);
-                        if (!targetPos) return null;
-                        
-                        return (task.dependencies || []).map(depId => {
-                            const sourcePos = positions.get(depId);
-                            if (!sourcePos) return null;
-
-                            const startX = sourcePos.x + NODE_WIDTH;
-                            const startY = sourcePos.y + NODE_HEIGHT / 2;
-                            const endX = targetPos.x;
-                            const endY = targetPos.y + NODE_HEIGHT / 2;
-                            
-                            const cp1X = startX + (endX - startX) / 2;
-                            const cp1Y = startY;
-                            const cp2X = startX + (endX - startX) / 2;
-                            const cp2Y = endY;
-                            
-                            const isMet = tasks.find(t => t.id === depId)?.status === 'completed';
-
-                            return (
-                                <g key={`${depId}-${task.id}`}>
-                                    <path 
-                                        d={`M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`}
-                                        fill="none"
-                                        stroke={isMet ? "#10b981" : "#4b5563"}
-                                        strokeWidth="2"
-                                        strokeDasharray={isMet ? "none" : "5,5"}
-                                        className="transition-all duration-500"
-                                    />
-                                    <circle cx={endX} cy={endY} r="4" fill={isMet ? "#10b981" : "#4b5563"} />
-                                    <circle cx={startX} cy={startY} r="4" fill={isMet ? "#10b981" : "#4b5563"} />
-                                </g>
-                            );
-                        });
-                    })}
-                </svg>
-                {tasks.map(task => {
-                    const pos = positions.get(task.id);
-                    if (!pos) return null;
-                    const assignedAgent = agents.find(a => a.id === task.assignedAgentId);
-                    
-                    return (
-                        <div 
-                            key={task.id}
-                            className={`absolute p-4 rounded-xl border flex flex-col shadow-lg z-10 transition-colors ${
-                                task.status === 'completed' ? 'bg-emerald-900/20 border-emerald-500/30' :
-                                task.status === 'in_progress' ? 'bg-amber-900/20 border-amber-500/30 ring-1 ring-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]' :
-                                task.status === 'failed' ? 'bg-rose-900/20 border-rose-500/30' :
-                                'bg-gray-800 border-gray-700'
-                            }`}
-                            style={{ width: NODE_WIDTH, height: NODE_HEIGHT, left: pos.x, top: pos.y }}
-                        >
-                            <div className="flex justify-between items-start mb-2 gap-2">
-                                <div className="text-sm font-bold text-white truncate">{task.title}</div>
-                                <div className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase whitespace-nowrap ${
-                                    task.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                                    task.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
-                                    task.status === 'failed' ? 'bg-rose-500/20 text-rose-400' :
-                                    'bg-gray-700 text-gray-400'
-                                }`}>
-                                    {task.status.replace('_', ' ')}
-                                </div>
-                            </div>
-                            <div className="text-[10px] text-gray-400 line-clamp-2 mb-auto" title={task.description}>{task.description}</div>
-                            {assignedAgent && (
-                                <div className="text-[9px] font-bold text-purple-400 mt-2 flex items-center gap-1.5 bg-purple-500/10 self-start px-2 py-1 rounded border border-purple-500/20">
-                                    <BrainCircuit className="w-3 h-3" /> {assignedAgent.name}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-  };
 
   return (
     <div className="h-full flex overflow-hidden bg-gray-900 rounded-t-xl border border-gray-800">
@@ -425,7 +342,104 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
 
       {/* Right Content Area */}
       {viewMode === 'taskGraph' ? (
-        renderTaskGraph()
+        <div className="flex-1 relative bg-gray-900 flex">
+          <div className="flex-1 relative">
+            {setTasks && (
+              <button
+                onClick={() => {
+                  const newTask: AgentTask = {
+                    id: `task_${Date.now()}`,
+                    title: 'New Task',
+                    description: '',
+                    assignedAgentId: null,
+                    deadline: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+                    status: 'todo',
+                    createdAt: Date.now(),
+                    dependencies: [],
+                    dataSources: []
+                  };
+                  setTasks([...tasks, newTask]);
+                  setSelectedTaskId(newTask.id);
+                }}
+                className="absolute top-4 right-4 z-10 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Create Task
+              </button>
+            )}
+            <SwarmGraph 
+              agents={agents} 
+              tasks={tasks} 
+              dataSources={dataSources} 
+              onNodeClick={(id, type) => {
+                if (type === 'agent') {
+                  setViewMode('agents');
+                  setSelectedAgentId(id);
+                } else if (type === 'task') {
+                  setSelectedTaskId(id);
+                }
+              }}
+            />
+          </div>
+          {selectedTaskId && selectedTask && setTasks && (
+            <div className="w-80 border-l border-gray-800 bg-gray-900/90 backdrop-blur-sm shadow-2xl flex flex-col">
+              <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900 sticky top-0">
+                <h3 className="font-bold text-white flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-purple-400" />
+                  Task Configuration
+                </h3>
+                <button 
+                  onClick={() => setSelectedTaskId(null)}
+                  className="p-1.5 hover:bg-gray-800 text-gray-400 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Title</label>
+                  <input 
+                    type="text" 
+                    value={selectedTask.title}
+                    onChange={(e) => {
+                      setTasks(tasks.map(t => t.id === selectedTask.id ? { ...t, title: e.target.value } : t));
+                    }}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Assigned Agent</label>
+                  <select 
+                    value={selectedTask.assignedAgentId || ''}
+                    onChange={(e) => {
+                      setTasks(tasks.map(t => t.id === selectedTask.id ? { ...t, assignedAgentId: e.target.value || null } : t));
+                    }}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500 appearance-none text-sm"
+                  >
+                    <option value="">Unassigned (Auto-delegate)</option>
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Status</label>
+                  <select 
+                    value={selectedTask.status}
+                    onChange={(e) => {
+                      setTasks(tasks.map(t => t.id === selectedTask.id ? { ...t, status: e.target.value as any } : t));
+                    }}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500 appearance-none text-sm capitalize"
+                  >
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-gray-900">
         {isCreating ? (
@@ -605,17 +619,48 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
                 </div>
               </div>
               <div className="flex gap-2">
-                <button 
-                  onClick={() => handleTrainAgent(selectedAgent.id)}
-                  disabled={selectedAgent.status === 'training'}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
-                >
-                  {selectedAgent.status === 'training' ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> TUNING...</>
-                  ) : (
-                    <><Database className="w-4 h-4" /> Train Agent</>
-                  )}
-                </button>
+                {(selectedAgent.status === 'idle' || selectedAgent.status === 'ready') && (
+                  <button 
+                    onClick={() => handleStartTraining(selectedAgent.id)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
+                  >
+                    <Play className="w-4 h-4" /> Start Training
+                  </button>
+                )}
+                
+                {selectedAgent.status === 'training' && (
+                  <>
+                    <button 
+                      onClick={() => handlePauseTraining(selectedAgent.id)}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
+                    >
+                      <Pause className="w-4 h-4" /> Pause
+                    </button>
+                    <button 
+                      onClick={() => handleResetTraining(selectedAgent.id)}
+                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4" /> Reset
+                    </button>
+                  </>
+                )}
+
+                {selectedAgent.status === 'paused' && (
+                  <>
+                    <button 
+                      onClick={() => handleStartTraining(selectedAgent.id)}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
+                    >
+                      <Play className="w-4 h-4" /> Resume
+                    </button>
+                    <button 
+                      onClick={() => handleResetTraining(selectedAgent.id)}
+                      className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-bold shadow-lg transition-all flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4" /> Reset
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -625,21 +670,24 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
                 <div className="flex items-center gap-2">
                   {selectedAgent.status === 'ready' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
                   {selectedAgent.status === 'training' && <Activity className="w-5 h-5 text-amber-500" />}
+                  {selectedAgent.status === 'paused' && <Pause className="w-5 h-5 text-orange-500" />}
                   <span className={`text-lg font-bold capitalize ${
                     selectedAgent.status === 'ready' ? 'text-emerald-400' :
-                    selectedAgent.status === 'training' ? 'text-amber-400' : 'text-gray-300'
+                    selectedAgent.status === 'training' ? 'text-amber-400' : 
+                    selectedAgent.status === 'paused' ? 'text-orange-400' : 'text-gray-300'
                   }`}>{selectedAgent.status}</span>
                 </div>
-                {selectedAgent.status === 'training' && selectedAgent.trainingProgress !== undefined && (
+                {(selectedAgent.status === 'training' || selectedAgent.status === 'paused') && selectedAgent.trainingProgress !== undefined && (
                   <div className="mt-4">
                     <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-full transition-all duration-300"
+                        className={`h-full rounded-full transition-all duration-300 ${selectedAgent.status === 'paused' ? 'bg-gray-500' : 'bg-gradient-to-r from-amber-500 to-amber-400'}`}
                         style={{ width: `${selectedAgent.trainingProgress}%` }}
                       />
                     </div>
-                    <div className="text-[10px] text-gray-400 text-right mt-1 font-mono">
-                      {selectedAgent.trainingProgress.toFixed(0)}%
+                    <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-mono">
+                      <span>{selectedAgent.status === 'paused' ? 'Paused' : selectedAgent.estimatedTimeRemaining && selectedAgent.estimatedTimeRemaining > 0 ? `~${selectedAgent.estimatedTimeRemaining}s left` : 'Finalizing...'}</span>
+                      <span>{selectedAgent.trainingProgress.toFixed(0)}%</span>
                     </div>
                   </div>
                 )}

@@ -25,6 +25,19 @@ const DeepSearchAI: React.FC<DeepSearchAIProps> = ({ stocks, onAddBot }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'scan' | 'analyze' | 'timing' | 'results'>('idle');
   const [results, setResults] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [stocksToScan, setStocksToScan] = useState<StockData[]>(stocks.slice(0, 3));
+
+  // Determine available categories from stocks
+  const categories = ['All', ...Array.from(new Set(stocks.map(s => s.assetType)))];
+
+  const handleDeepIndexScan = () => {
+    if (selectedCategory === 'All') {
+      setStocksToScan(stocks);
+    } else {
+      setStocksToScan(stocks.filter(s => s.assetType === selectedCategory));
+    }
+  };
 
   const startDeepSearch = async () => {
     setIsSearching(true);
@@ -42,8 +55,8 @@ const DeepSearchAI: React.FC<DeepSearchAIProps> = ({ stocks, onAddBot }) => {
     await new Promise(r => setTimeout(r, 2500));
     setPhase('results');
     
-    // Generate amazing fake results using available stocks or fallback to big names
-    const targetStocks = stocks.slice(0, 3);
+    // Generate amazing fake results using available stocks to scan
+    const targetStocks = stocksToScan.length > 0 ? stocksToScan : stocks.slice(0, 3);
     
     const catalysts = [
       "Approaching FDA Approval phase 3 clinical trial readouts expecting 85% efficacy.",
@@ -100,6 +113,21 @@ const DeepSearchAI: React.FC<DeepSearchAIProps> = ({ stocks, onAddBot }) => {
           </h2>
           <p className="text-xs font-mono text-gray-400 uppercase tracking-widest mt-1">Autonomous 3-Stage Catalyst & Timing Discovery Chain</p>
         </div>
+        <div className="flex bg-gray-900 border border-gray-800 rounded-xl p-2 gap-2 items-center">
+            <select 
+              value={selectedCategory} 
+              onChange={e => setSelectedCategory(e.target.value)}
+              className="bg-gray-800 border-none text-white text-xs p-2 rounded-lg"
+            >
+               {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button 
+              onClick={handleDeepIndexScan} 
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap"
+            >
+              Deep Index Scan
+            </button>
+        </div>
       </div>
 
       {phase === 'idle' && (
@@ -110,6 +138,15 @@ const DeepSearchAI: React.FC<DeepSearchAIProps> = ({ stocks, onAddBot }) => {
           <p className="text-gray-400 text-center max-w-lg mb-10 z-10">
             Deploy an interconnected swarm of AI models to simultaneously scan global markets, identify upcoming hidden catalysts, and calculate the exact microsecond to trigger the play.
           </p>
+          <div className="z-10 mb-8 bg-gray-900 p-4 rounded-xl border border-gray-800 w-full max-w-xl text-center">
+             <div className="text-xs text-gray-400 uppercase font-bold mb-3 flex items-center justify-center gap-2"><Target className="w-4 h-4 text-fuchsia-500"/> Target Stock Index ({stocksToScan.length})</div>
+             <div className="flex flex-wrap items-center justify-center gap-2">
+                 {stocksToScan.slice(0, 10).map(s => (
+                     <span key={s.symbol} className="text-[10px] bg-gray-800 px-2 py-1 rounded-md text-gray-200 border border-gray-700">{s.symbol}</span>
+                 ))}
+                 {stocksToScan.length > 10 && <span className="text-[10px] text-fuchsia-500 font-bold">+{stocksToScan.length - 10} more assets in queue</span>}
+             </div>
+          </div>
           <button 
             onClick={startDeepSearch}
             className="group relative px-8 py-4 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black uppercase text-sm tracking-widest rounded-full overflow-hidden transition-all shadow-[0_0_40px_rgba(192,38,211,0.4)] hover:shadow-[0_0_60px_rgba(192,38,211,0.6)] z-10"
@@ -132,7 +169,7 @@ const DeepSearchAI: React.FC<DeepSearchAIProps> = ({ stocks, onAddBot }) => {
                 </h3>
                 {phase !== 'scan' && <span className="text-xs font-mono text-emerald-500 uppercase">Complete</span>}
               </div>
-              <p className="text-sm font-mono text-gray-400">Scanning 18,492 global equities across 42 dark pools and lit exchanges...</p>
+              <p className="text-sm font-mono text-gray-400">Scanning {stocksToScan.length} {selectedCategory === 'All' ? 'global assets' : selectedCategory} across dark pools and lit exchanges...</p>
             </div>
 
             <div className={`p-6 rounded-2xl border transition-all duration-1000 ${phase === 'analyze' ? 'bg-indigo-900/20 border-indigo-500 shadow-[0_0_30px_rgba(99,102,241,0.2)]' : phase === 'scan' ? 'bg-black border-gray-900 opacity-20' : 'bg-gray-900/50 border-gray-800 opacity-50'}`}>

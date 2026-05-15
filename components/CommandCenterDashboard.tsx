@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { StockData, TradingBot, PortfolioPosition, ActiveOrder } from '../types';
 import StockChart from './StockChart';
 import AIAssistant from './AIAssistant';
+import OrderBook from './OrderBook';
 import { BrainCircuit, Activity, Zap, TrendingUp, TrendingDown, Target, Focus, List, Briefcase, Clock, Search, Network, Globe } from 'lucide-react';
 
 interface CommandCenterProps {
@@ -213,23 +214,34 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
           {/* Chart Area */}
           <div className="flex-1 relative p-4 flex flex-col">
               {selectedStock ? (
-                  <div 
-                     className="flex-1 bg-[#0a0a1a] border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl relative group cursor-pointer"
-                     onClick={() => onOpenDetails(selectedSymbol)}
-                  >
-                      <div className="absolute inset-0 z-10 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
-                          <div className="bg-gray-900/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg border border-gray-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2 shadow-xl">
-                              <Target className="w-4 h-4" /> View Details & Trade
+                  <div className="flex-1 flex gap-4 min-h-0">
+                      <div 
+                         className="flex-1 bg-[#0a0a1a] border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl relative group cursor-pointer"
+                         onClick={() => onOpenDetails(selectedSymbol)}
+                      >
+                          <div className="absolute inset-0 z-10 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
+                              <div className="bg-gray-900/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg border border-gray-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2 shadow-xl">
+                                  <Target className="w-4 h-4" /> View Details & Trade
+                              </div>
+                          </div>
+                          <div className="absolute inset-0 z-0 bg-gradient-to-t from-[#050510]/50 to-transparent pointer-events-none" />
+                          <StockChart 
+                              data={selectedStock.history} 
+                              color={selectedStock.change >= 0 ? '#10b981' : '#ef4444'} 
+                              allStocks={stocks}
+                              selectedSymbol={selectedSymbol}
+                              onSymbolSelect={setSelectedSymbol}
+                          />
+                      </div>
+                      
+                      <div className="w-72 bg-[#0a0a1a] border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl hidden lg:flex flex-col">
+                          <div className="px-4 py-2 border-b border-indigo-900/30 bg-[#101020]/80">
+                              <h3 className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Order Book</h3>
+                          </div>
+                          <div className="flex-1 overflow-hidden">
+                              <OrderBook currentPrice={selectedStock.price} />
                           </div>
                       </div>
-                      <div className="absolute inset-0 z-0 bg-gradient-to-t from-[#050510]/50 to-transparent pointer-events-none" />
-                      <StockChart 
-                          data={selectedStock.history} 
-                          color={selectedStock.change >= 0 ? '#10b981' : '#ef4444'} 
-                          allStocks={stocks}
-                          selectedSymbol={selectedSymbol}
-                          onSymbolSelect={setSelectedSymbol}
-                      />
                   </div>
               ) : (
                   <div className="flex-1 flex items-center justify-center text-gray-500">

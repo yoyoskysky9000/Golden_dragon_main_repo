@@ -144,6 +144,30 @@ function App() {
       status: 'ready',
       accuracyScore: 94.5,
       lastTrainedAt: Date.now() - 86400000
+    },
+    {
+      id: 'agent_api_health',
+      name: 'API Health Monitor',
+      role: 'Data Engineer',
+      model: 'gemini-3.1-flash',
+      trainingDataSources: [{ id: '8', priority: 99 }],
+      systemPrompt: 'You monitor the status of all active API feeds and report any disconnections or errors to the Master Allocator AI.',
+      parentAgentId: 'agent_master_0',
+      status: 'ready',
+      accuracyScore: 98.0,
+      lastTrainedAt: Date.now() - 3600000
+    },
+    {
+      id: 'agent_quant_dev',
+      name: 'Quantitative Modeler Alpha',
+      role: 'Quant Developer',
+      model: 'gemini-3.1-pro-preview',
+      trainingDataSources: [{ id: '3', priority: 80 }],
+      systemPrompt: 'You are the Quant Developer. Develop and maintain statistical arbitrage models based on incoming news sentiment.',
+      parentAgentId: 'agent_master_0',
+      status: 'ready',
+      accuracyScore: 92.1,
+      lastTrainedAt: Date.now() - 7200000
     }
   ]);
 
@@ -357,8 +381,10 @@ function App() {
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [aiInitialMessage, setAiInitialMessage] = useState<string>('');
   const [botToOptimize, setBotToOptimize] = useState<TradingBot | null>(null);
+  const [manualConfirmationOrder, setManualConfirmationOrder] = useState<PendingOrder & { isLive?: boolean, originalOrder?: any } | null>(null);
 
   // Hypothetical fetch API for selected stock details
+
   const fetchStockData = async (symbol: string): Promise<StockData | undefined> => {
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -517,6 +543,28 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Agent monitor loop for data source dependencies
+  useEffect(() => {
+    const newsDataSource = effectiveDataSources.find(ds => ds.id === '3');
+    
+    setAgents(prev => {
+      let changed = false;
+      const newAgents = prev.map(agent => {
+        if (agent.role === 'Quant Developer' && agent.trainingDataSources.some(ds => ds.id === '3')) {
+          if (newsDataSource && newsDataSource.effectiveStatus === 'error' && agent.status !== 'error' && agent.status !== 'paused') {
+            changed = true;
+            return { ...agent, status: 'paused' };
+          } else if (newsDataSource && newsDataSource.effectiveStatus === 'connected' && agent.status === 'paused') {
+            changed = true;
+            return { ...agent, status: 'ready' };
+          }
+        }
+        return agent;
+      });
+      return changed ? newAgents : prev;
+    });
+  }, [effectiveDataSources]);
+
   // Auto-AI Trading Loop
   useEffect(() => {
     const autoLoop = setInterval(async () => {
@@ -524,8 +572,18 @@ function App() {
       for (const bot of activeAutoBots) {
         const stock = stocks.find(s => s.symbol === bot.symbol);
         if (stock) {
-          // Filter data sources based on bot's selection
-          const selectedSources = effectiveDataSources.filter(ds => bot.dataSources.some(s => s.id === ds.id));
+          // Filter data sources based on bot's selection, prioritize them, and ensure they are connected
+          const selectedSources = effectiveDataSources
+            .filter(ds => ds.effectiveStatus === 'connected')
+            .filter(ds => bot.dataSources.some(s => s.id === ds.id))
+            .map(ds => {
+               const botConfig = bot.dataSources.find(s => s.id === ds.id);
+               return {
+                 ...ds,
+                 priority: botConfig?.priority ?? ds.priority
+               };
+            })
+            .sort((a, b) => b.priority - a.priority);
           try {
             const signal = await generateTradingSignal(bot, stock, selectedSources);
             if (signal) {
@@ -811,7 +869,11 @@ function App() {
     addNotification("Exchange Disconnected", "All exchanges disconnected.", 'alert');
   };
 
-  const handlePlaceOrder = (order: { symbol: string, side: 'buy' | 'sell', type: 'market' | 'limit' | 'stop-loss', shares: number, price?: number, isLive?: boolean }) => {
+  const handlePlaceOrder = (order: { 
+      symbol: string, side: 'buy' | 'sell', type: 'market' | 'limit' | 'stop-loss' | 'take-profit' | 'bracket', 
+      shares: number, price?: number, isLive?: boolean,
+      isPreMarket?: boolean, stopLossPrice?: number, takeProfitPrice?: number
+  }, skipConfirmation?: boolean) => {
     if (!isSimConnected) {
         addNotification("Trade Failed", "Please connect an exchange first.", 'alert');
         setActiveView(AppView.CONNECTIONS);
@@ -826,6 +888,21 @@ function App() {
 
     const orderPrice = order.type === 'market' ? stock.price : (order.price || stock.price);
     const totalCost = orderPrice * order.shares;
+    
+    if (!skipConfirmation) {
+        setManualConfirmationOrder({
+            symbol: order.symbol,
+            side: order.side,
+            type: order.type,
+            shares: order.shares,
+            price: orderPrice,
+            estimatedTotal: totalCost,
+            isLive: order.isLive,
+            originalOrder: order
+        });
+        return;
+    }
+
     const mode = order.isLive ? 'LIVE' : 'PAPER';
 
     // Validation
@@ -842,7 +919,7 @@ function App() {
         }
     }
 
-    if (order.type === 'market') {
+    if (order.type === 'market' && !order.isPreMarket) {
         // Execute market order immediately
         if (order.side === 'buy') {
             setCashBalance(prev => prev - totalCost);
@@ -857,6 +934,36 @@ function App() {
                 }
                 return [...prev, { symbol: order.symbol, shares: order.shares, avgCost: orderPrice }];
             });
+            
+            // If Bracket (TP/SL) was set, create open limit/stop orders
+            if (order.stopLossPrice || order.takeProfitPrice) {
+                const newBracketOrders: ActiveOrder[] = [];
+                if (order.takeProfitPrice) {
+                    newBracketOrders.push({
+                        id: `ord-${Date.now()}-tp`,
+                        symbol: order.symbol,
+                        side: 'sell', // Opposite to buy
+                        type: 'take-profit',
+                        shares: order.shares,
+                        price: order.takeProfitPrice,
+                        timestamp: Date.now(),
+                        status: 'open'
+                    });
+                }
+                if (order.stopLossPrice) {
+                    newBracketOrders.push({
+                        id: `ord-${Date.now()}-sl`,
+                        symbol: order.symbol,
+                        side: 'sell',
+                        type: 'stop-loss',
+                        shares: order.shares,
+                        price: order.stopLossPrice,
+                        timestamp: Date.now(),
+                        status: 'open'
+                    });
+                }
+                if (newBracketOrders.length > 0) setActiveOrders(prev => [...prev, ...newBracketOrders]);
+            }
         } else {
             setCashBalance(prev => prev + totalCost);
             setPortfolio(prev => {
@@ -872,10 +979,40 @@ function App() {
                     shares: p.shares - order.shares
                 } : p);
             });
+            
+            // Bracket for short selling (if supported). Here we mirror the logic
+            if (order.stopLossPrice || order.takeProfitPrice) {
+                const newBracketOrders: ActiveOrder[] = [];
+                if (order.takeProfitPrice) {
+                    newBracketOrders.push({
+                        id: `ord-${Date.now()}-tp`,
+                        symbol: order.symbol,
+                        side: 'buy', // Opposite to sell
+                        type: 'take-profit',
+                        shares: order.shares,
+                        price: order.takeProfitPrice,
+                        timestamp: Date.now(),
+                        status: 'open'
+                    });
+                }
+                if (order.stopLossPrice) {
+                    newBracketOrders.push({
+                        id: `ord-${Date.now()}-sl`,
+                        symbol: order.symbol,
+                        side: 'buy',
+                        type: 'stop-loss',
+                        shares: order.shares,
+                        price: order.stopLossPrice,
+                        timestamp: Date.now(),
+                        status: 'open'
+                    });
+                }
+                if (newBracketOrders.length > 0) setActiveOrders(prev => [...prev, ...newBracketOrders]);
+            }
         }
         addNotification(`${mode} Order Executed`, `Successfully ${order.side === 'buy' ? 'bought' : 'sold'} ${order.shares} ${order.symbol} at ${formatMoney(orderPrice)}.`, 'success');
     } else {
-        // Add pending limit/stop-loss order
+        // Add pending limit/stop-loss/take-profit/pre-market order
         const newOrder: ActiveOrder = {
             id: `ord-${Date.now()}`,
             symbol: order.symbol,
@@ -884,7 +1021,10 @@ function App() {
             shares: order.shares,
             price: orderPrice,
             timestamp: Date.now(),
-            status: 'open'
+            status: 'open',
+            isPreMarket: order.isPreMarket,
+            stopLoss: order.stopLossPrice,
+            takeProfit: order.takeProfitPrice
         };
         
         setActiveOrders(prev => [...prev, newOrder]);
@@ -895,7 +1035,7 @@ function App() {
         }
         // For sells, we would ideally reserve shares here, but not strictly needed for this simplified demo
         
-        addNotification(`${mode} Order Placed`, `${order.type.toUpperCase()} ${order.side.toUpperCase()} for ${order.shares} ${order.symbol} at ${formatMoney(orderPrice)} received.`, 'success');
+        addNotification(`${mode} Order Placed`, `${order.isPreMarket ? '[PRE-MARKET] ' : ''}${order.type.toUpperCase()} ${order.side.toUpperCase()} for ${order.shares} ${order.symbol} at ${order.type === 'market' ? 'MKT' : formatMoney(orderPrice)} received.`, 'success');
     }
   };
 
@@ -1127,7 +1267,13 @@ function App() {
             ) : activeView === AppView.ACCOUNT ? (
                 <AccountDashboard addNotification={addNotification} />
             ) : activeView === AppView.MARKETPLACE ? (
-                <DataMarketplace addNotification={addNotification} />
+                <DataMarketplace 
+                  addNotification={addNotification} 
+                  onAddDataSource={handleAddDataSource}
+                  onUpdateDataSource={handleUpdateDataSource}
+                  onDeleteDataSource={handleDeleteDataSource}
+                  userDataSources={effectiveDataSources}
+                />
             ) : activeView === AppView.PREDICTION_MARKETS ? (
                 <PredictionMarketsLab />
             ) : activeView === AppView.SWARM ? (
@@ -1197,6 +1343,93 @@ function App() {
           </motion.div>
         </AnimatePresence>
         
+        {/* Global Manual Trade Confirmation Modal */}
+        {manualConfirmationOrder && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col p-6">
+                    <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-amber-500" /> Confirm Manual Order
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-6">Please verify the order details before proceeding.</p>
+
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span className="text-gray-500 text-sm uppercase font-bold tracking-wider">Symbol</span>
+                            <span className="text-white font-bold">{manualConfirmationOrder.symbol}</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span className="text-gray-500 text-sm uppercase font-bold tracking-wider">Action</span>
+                            <span className={`font-bold ${manualConfirmationOrder.side === 'buy' ? 'text-emerald-500' : 'text-rose-500'} uppercase`}>
+                                {manualConfirmationOrder.side}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span className="text-gray-500 text-sm uppercase font-bold tracking-wider">Type</span>
+                            <span className="text-white font-bold">{manualConfirmationOrder.type.toUpperCase()}</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span className="text-gray-500 text-sm uppercase font-bold tracking-wider">Quantity</span>
+                            <span className="text-white font-bold">{manualConfirmationOrder.shares} Shares</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span className="text-gray-500 text-sm uppercase font-bold tracking-wider">Price</span>
+                            <span className="text-white font-bold font-mono">
+                                {manualConfirmationOrder.type === 'market' ? 'Market Price' : formatMoney(manualConfirmationOrder.price)}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                            <span className="text-gray-500 text-sm uppercase font-bold tracking-wider">Est. Total</span>
+                            <span className="text-amber-500 font-bold font-mono text-lg">{formatMoney(manualConfirmationOrder.estimatedTotal)}</span>
+                        </div>
+                        {manualConfirmationOrder.originalOrder?.isPreMarket && (
+                            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                                <span className="text-gray-500 text-xs uppercase font-bold tracking-wider">Timing</span>
+                                <span className="text-indigo-400 font-bold text-xs uppercase">Pre-Market (Queued)</span>
+                            </div>
+                        )}
+                        {manualConfirmationOrder.originalOrder?.takeProfitPrice && (
+                            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                                <span className="text-gray-500 text-xs uppercase font-bold tracking-wider">Take Profit</span>
+                                <span className="text-emerald-500 font-bold font-mono text-xs">
+                                    {formatMoney(manualConfirmationOrder.originalOrder.takeProfitPrice)}
+                                </span>
+                            </div>
+                        )}
+                        {manualConfirmationOrder.originalOrder?.stopLossPrice && (
+                            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                                <span className="text-gray-500 text-xs uppercase font-bold tracking-wider">Stop Loss</span>
+                                <span className="text-rose-500 font-bold font-mono text-xs">
+                                    {formatMoney(manualConfirmationOrder.originalOrder.stopLossPrice)}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-8">
+                        <button 
+                            onClick={() => setManualConfirmationOrder(null)}
+                            className="px-5 py-2.5 rounded-lg font-medium text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={() => {
+                                handlePlaceOrder(manualConfirmationOrder.originalOrder, true);
+                                setManualConfirmationOrder(null);
+                            }}
+                            className={`px-6 py-2.5 rounded-lg font-bold text-white shadow-lg flex items-center gap-2 ${
+                                manualConfirmationOrder.side === 'buy' 
+                                ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/30' 
+                                : 'bg-rose-600 hover:bg-rose-500 shadow-rose-900/30'
+                            }`}
+                        >
+                            Confirm Order
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* Floating AI Button & Panel */}
         <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
             {isAIPanelOpen && (

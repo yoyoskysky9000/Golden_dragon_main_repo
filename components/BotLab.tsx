@@ -220,7 +220,7 @@ const BotLab: React.FC<BotLabProps> = ({
     value: '30',
     action: 'buy',
     logic: 'AND' as 'AND' | 'OR',
-    additionalRules: [] as { indicator: string; condition: string; value: string }[],
+    additionalRules: [] as { indicator: string; condition: string; value: string; logic?: 'AND' | 'OR' }[],
     selectedSources: dataSources.map(ds => ({ id: ds.id, priority: ds.priority }))
   });
 
@@ -883,10 +883,18 @@ const BotLab: React.FC<BotLabProps> = ({
                                       <div key={index} className="mt-4 pt-4 border-t border-gray-800">
                                           <div className="flex items-center justify-between mb-2">
                                               <select 
-                                                  value={index === 0 ? manualConfig.logic : manualConfig.logic}
-                                                  onChange={e => setManualConfig({...manualConfig, logic: e.target.value as 'AND' | 'OR'})}
+                                                  value={index === 0 ? manualConfig.logic : (rule.logic || 'AND')}
+                                                  onChange={e => {
+                                                      const value = e.target.value as 'AND' | 'OR';
+                                                      if (index === 0) {
+                                                          setManualConfig({...manualConfig, logic: value});
+                                                      } else {
+                                                          const newRules = [...manualConfig.additionalRules];
+                                                          newRules[index].logic = value;
+                                                          setManualConfig({...manualConfig, additionalRules: newRules});
+                                                      }
+                                                  }}
                                                   className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-                                                  disabled={index > 0} 
                                               >
                                                   <option value="AND">AND</option>
                                                   <option value="OR">OR</option>
@@ -961,15 +969,17 @@ const BotLab: React.FC<BotLabProps> = ({
                                       </div>
                                   ))}
 
-                                  <button 
-                                      onClick={() => setManualConfig({
-                                          ...manualConfig, 
-                                          additionalRules: [...manualConfig.additionalRules, { indicator: 'RSI', condition: 'LT', value: '30' }]
-                                      })}
-                                      className="mt-4 w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded border border-gray-700 text-xs flex items-center justify-center gap-2 transition-colors"
-                                  >
-                                      + Add Condition
-                                  </button>
+                                  {manualConfig.additionalRules.length < 3 && (
+                                    <button 
+                                        onClick={() => setManualConfig({
+                                            ...manualConfig, 
+                                            additionalRules: [...manualConfig.additionalRules, { indicator: 'RSI', condition: 'LT', value: '30' }]
+                                        })}
+                                        className="mt-4 w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded border border-gray-700 text-xs flex items-center justify-center gap-2 transition-colors"
+                                    >
+                                        + Add Condition
+                                    </button>
+                                  )}
                               </div>
 
                               <div>

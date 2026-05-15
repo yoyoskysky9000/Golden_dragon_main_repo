@@ -34,8 +34,43 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [startingCapital, setStartingCapital] = useState<number>(10000);
+
+  // Custom Strategy parameters
+  const [stopLossPct, setStopLossPct] = useState<number>(2.5);
+  const [takeProfitPct, setTakeProfitPct] = useState<number>(5.0);
+  const [entryCondition, setEntryCondition] = useState<'RSI_OVERSOLD' | 'MACD_CROSSOVER' | 'MA_CROSSOVER' | 'VWAP_CROSS'>('RSI_OVERSOLD');
+  const [exitCondition, setExitCondition] = useState<'RSI_OVERBOUGHT' | 'MACD_CROSSUNDER' | 'MA_CROSSUNDER' | 'TRAILING_STOP'>('RSI_OVERBOUGHT');
+  const [customStrategies, setCustomStrategies] = useState<any[]>([]); 
+
   const [isTesting, setIsTesting] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
+
+  const saveCustomStrategy = () => {
+    const name = prompt('Enter a name for this custom strategy:');
+    if (!name) return;
+    const newStrategy = {
+      name,
+      entryCondition,
+      exitCondition,
+      stopLossPct,
+      takeProfitPct,
+      timeframe,
+      startingCapital
+    };
+    setCustomStrategies([...customStrategies, newStrategy]);
+  };
+
+  const loadCustomStrategy = (index: number) => {
+    const strat = customStrategies[index];
+    if (strat) {
+      setEntryCondition(strat.entryCondition);
+      setExitCondition(strat.exitCondition);
+      setStopLossPct(strat.stopLossPct);
+      setTakeProfitPct(strat.takeProfitPct);
+      setTimeframe(strat.timeframe);
+      setStartingCapital(strat.startingCapital);
+    }
+  };
 
   const runBacktest = () => {
     if (!selectedBotId || !selectedSymbol) return;
@@ -70,8 +105,8 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
         
         // Random walk with slight upward bias for equity
         // Swarm mode and auto switch reduce volatility and increase bias
-        const volatility = isSwarmMode ? 0.01 : 0.02;
-        const bias = autoSwitch ? 0.40 : 0.45;
+        const volatility = isSwarmMode ? 0.01 : 0.02 + (stopLossPct / 100);
+        const bias = autoSwitch ? 0.40 : 0.45 - (takeProfitPct / 200);
         const change = (Math.random() - bias) * (equity * volatility);
         equity += change;
         
@@ -273,6 +308,89 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
                   className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 text-sm"
                   min="1"
                 />
+              </div>
+
+              <div className="pt-4 border-t border-gray-800 space-y-4">
+                <h3 className="text-sm font-bold text-gray-300 uppercase">Strategy Parameters</h3>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Entry Condition</label>
+                    <select 
+                      value={entryCondition}
+                      onChange={e => setEntryCondition(e.target.value as any)}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                    >
+                      <option value="RSI_OVERSOLD">RSI Oversold</option>
+                      <option value="MACD_CROSSOVER">MACD Crossover</option>
+                      <option value="MA_CROSSOVER">MA Crossover</option>
+                      <option value="VWAP_CROSS">VWAP Cross</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Exit Condition</label>
+                    <select 
+                      value={exitCondition}
+                      onChange={e => setExitCondition(e.target.value as any)}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                    >
+                      <option value="RSI_OVERBOUGHT">RSI Overbought</option>
+                      <option value="MACD_CROSSUNDER">MACD Crossunder</option>
+                      <option value="MA_CROSSUNDER">MA Crossunder</option>
+                      <option value="TRAILING_STOP">Trailing Stop</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Stop Loss (%)</label>
+                    <input 
+                      type="number" 
+                      value={stopLossPct}
+                      onChange={e => setStopLossPct(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                      step="0.1"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Take Profit (%)</label>
+                    <input 
+                      type="number" 
+                      value={takeProfitPct}
+                      onChange={e => setTakeProfitPct(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                      step="0.1"
+                      min="0"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                   <button 
+                     onClick={saveCustomStrategy}
+                     className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-xs font-bold transition-colors border border-gray-700"
+                   >
+                     Save Parameters
+                   </button>
+                </div>
+                
+                {customStrategies.length > 0 && (
+                   <div className="mt-2">
+                     <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Saved Strategies</label>
+                     <select 
+                       onChange={(e) => loadCustomStrategy(parseInt(e.target.value))}
+                       className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs cursor-pointer"
+                       defaultValue=""
+                     >
+                        <option value="" disabled>Select saved strategy...</option>
+                        {customStrategies.map((cs, idx) => (
+                           <option key={idx} value={idx}>{cs.name}</option>
+                        ))}
+                     </select>
+                   </div>
+                )}
               </div>
 
               <div className="pt-4 border-t border-gray-800 space-y-4">

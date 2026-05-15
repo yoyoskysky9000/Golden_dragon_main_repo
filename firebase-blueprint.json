@@ -10,6 +10,8 @@
         "stakedAmount": { "type": "number", "description": "Amount of coin staked for gas" },
         "gasBalance": { "type": "number", "description": "Available gas to run strategies" },
         "isSellingData": { "type": "boolean", "description": "Whether the user opted in to sell their data" },
+        "mfaEnabled": { "type": "boolean", "description": "Is 2FA enabled" },
+        "mfaSecret": { "type": "string", "description": "TOTP secret for MFA" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }
       },

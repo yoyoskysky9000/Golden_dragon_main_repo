@@ -3,7 +3,9 @@ import { UserAccount } from '../types';
 import { auth, db, handleFirestoreError, signInWithGoogle, signOut, OperationType, ensureUserAccount } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { LogIn, LogOut, Wallet, Target, Cpu, Flame, Database, Plus, ShieldCheck } from 'lucide-react';
+import { LogIn, LogOut, Wallet, Target, Cpu, Flame, Database, Plus, ShieldCheck, Shield } from 'lucide-react';
+import { generateSecret, verify as verifyTotp, generateURI } from 'otplib';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface AccountDashboardProps {
   addNotification: (title: string, message: string, type: 'success' | 'alert') => void;
@@ -13,6 +15,10 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ addNotification }) 
     const [user, setUser] = useState<any>(null);
     const [account, setAccount] = useState<UserAccount | null>(null);
     const [loading, setLoading] = useState(true);
+    const [mfaSetupKey, setMfaSetupKey] = useState<string | null>(null);
+    const [mfaUri, setMfaUri] = useState<string | null>(null);
+    const [code, setCode] = useState('');
+    const [isVerifying, setIsVerifying] = useState(false);
     
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -80,6 +86,63 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ addNotification }) 
             handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
         }
     }
+
+    const handleEnableMFA = () => {
+        if (!user || mfaSetupKey) return;
+        const secret = generateSecret();
+        const otpauth = generateURI({
+            issuer: 'Golden Dragon',
+            label: user.email || 'user',
+            secret
+        });
+        setMfaSetupKey(secret);
+        setMfaUri(otpauth);
+        setCode('');
+    };
+
+    const handleVerifyMFA = async (action: 'enable' | 'disable') => {
+        if (!user || !account) return;
+        setIsVerifying(true);
+        
+        try {
+            if (action === 'enable') {
+                if (!mfaSetupKey) return;
+                const result = await verifyTotp({ token: code, secret: mfaSetupKey });
+                if (result.valid) {
+                    await updateDoc(doc(db, 'users', user.uid), {
+                        mfaEnabled: true,
+                        mfaSecret: mfaSetupKey,
+                        updatedAt: serverTimestamp()
+                    });
+                    addNotification('2FA Enabled', 'Your account is now protected with Two-Factor Authentication.', 'success');
+                    setMfaSetupKey(null);
+                    setMfaUri(null);
+                    setCode('');
+                } else {
+                    addNotification('Invalid Code', 'The code you entered is incorrect.', 'alert');
+                }
+            } else if (action === 'disable') {
+                if (!account.mfaSecret) return;
+                const result = await verifyTotp({ token: code, secret: account.mfaSecret });
+                if (result.valid) {
+                    await updateDoc(doc(db, 'users', user.uid), {
+                        mfaEnabled: false,
+                        mfaSecret: '',
+                        updatedAt: serverTimestamp()
+                    });
+                    addNotification('2FA Disabled', 'Your account is no longer protected.', 'alert');
+                    setCode('');
+                } else {
+                    addNotification('Invalid Code', 'The code you entered is incorrect.', 'alert');
+                }
+            }
+        } catch (error) {
+            handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+            addNotification('Error', 'Failed to update MFA settings.', 'alert');
+        } finally {
+            setIsVerifying(false);
+        }
+    };
 
     if (!user) {
         return (
@@ -211,6 +274,82 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ addNotification }) 
                                 {account.isSellingData ? 'Monetization Active' : 'Enable Monetization'}
                             </button>
                         </div>
+                    </div>
+
+                    {/* Security & MFA */}
+                    <div className="col-span-1 md:col-span-3 bg-[#0a0a18]/70 border border-blue-900/30 rounded-xl p-6 mt-4 backdrop-blur-md">
+                        <h3 className="text-lg font-black text-blue-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <Shield className="w-6 h-6" /> Security & Authentication
+                        </h3>
+                        {account.mfaEnabled ? (
+                            <div className="flex flex-col md:flex-row items-center justify-between bg-gray-900/50 p-6 rounded-lg border border-blue-500/20">
+                                <div>
+                                    <h4 className="text-white font-bold mb-1">Two-Factor Authentication (2FA) is Active</h4>
+                                    <p className="text-sm text-gray-400">Your account and API keys are protected. To disable 2FA, enter your code below.</p>
+                                </div>
+                                <div className="mt-4 md:mt-0 flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="000 000"
+                                        value={code}
+                                        onChange={(e) => setCode(e.target.value)}
+                                        className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 font-mono w-32 text-center tracking-widest"
+                                        maxLength={6}
+                                    />
+                                    <button 
+                                        onClick={() => handleVerifyMFA('disable')}
+                                        disabled={isVerifying || code.length < 6}
+                                        className="px-6 py-3 rounded-lg font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors uppercase text-sm cursor-pointer disabled:opacity-50"
+                                    >
+                                        Disable
+                                    </button>
+                                </div>
+                            </div>
+                        ) : mfaSetupKey ? (
+                            <div className="bg-gray-900/50 p-6 rounded-lg border border-amber-500/20 flex flex-col items-center">
+                                <h4 className="text-white font-bold mb-4">Scan QR Code</h4>
+                                <div className="bg-white p-4 rounded-xl mb-4">
+                                    {mfaUri && <QRCodeSVG value={mfaUri} size={200} />}
+                                </div>
+                                <p className="text-sm text-gray-400 mb-6 text-center max-w-sm">Scan this code with Google Authenticator, Authy, or your preferred TOTP app, then enter the 6-digit code below to verify.</p>
+                                <div className="flex flex-wrap justify-center gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="000 000"
+                                        value={code}
+                                        onChange={(e) => setCode(e.target.value)}
+                                        className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 font-mono w-40 text-center tracking-widest text-lg"
+                                        maxLength={6}
+                                    />
+                                    <button 
+                                        onClick={() => handleVerifyMFA('enable')}
+                                        disabled={isVerifying || code.length < 6}
+                                        className="px-8 py-3 rounded-lg font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors uppercase text-sm cursor-pointer disabled:opacity-50"
+                                    >
+                                        Verify
+                                    </button>
+                                    <button 
+                                        onClick={() => { setMfaSetupKey(null); setCode(''); }}
+                                        className="px-4 py-3 rounded-lg font-bold bg-gray-800 hover:bg-gray-700 text-white transition-colors uppercase text-sm cursor-pointer"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col md:flex-row items-center justify-between bg-gray-900/50 p-6 rounded-lg border border-gray-800">
+                                <div>
+                                    <h4 className="text-white font-bold mb-1">Protect Your Account</h4>
+                                    <p className="text-sm text-gray-400">Enable TOTP Two-Factor Authentication to secure withdrawals and API keys.</p>
+                                </div>
+                                <button 
+                                    onClick={handleEnableMFA}
+                                    className="mt-4 md:mt-0 px-6 py-3 rounded-lg font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors uppercase text-sm cursor-pointer"
+                                >
+                                    Enable 2FA
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                 </div>

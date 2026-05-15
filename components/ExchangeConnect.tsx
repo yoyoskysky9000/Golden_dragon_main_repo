@@ -1,5 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PlugZap, CheckCircle2, AlertCircle, Loader2, Key, Shield, RefreshCw, Wallet, Settings } from 'lucide-react';
+import { auth, db } from '../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { verify as verifyTotp } from 'otplib';
 
 interface Exchange {
   id: string;
@@ -30,6 +34,25 @@ export default function ExchangeConnect({ onConnect, onDisconnect }: ExchangeCon
   const [apiSecret, setApiSecret] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [showMfaPrompt, setShowMfaPrompt] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [userMfaSecret, setUserMfaSecret] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const d = await getDoc(doc(db, 'users', user.uid));
+        if (d.exists() && d.data().mfaEnabled && d.data().mfaSecret) {
+          setUserMfaSecret(d.data().mfaSecret);
+        } else {
+          setUserMfaSecret(null);
+        }
+      } else {
+        setUserMfaSecret(null);
+      }
+    });
+    return unsub;
+  }, []);
 
   React.useEffect(() => {
     const autoConnect = async () => {
@@ -113,6 +136,23 @@ export default function ExchangeConnect({ onConnect, onDisconnect }: ExchangeCon
 
   const handleConnect = async () => {
     if (!selectedExchange || !apiKey || !apiSecret) return;
+
+    if (userMfaSecret && !showMfaPrompt) {
+        setShowMfaPrompt(true);
+        return;
+    }
+
+    if (userMfaSecret && showMfaPrompt) {
+        setIsConnecting(true);
+        const result = await verifyTotp({ token: mfaCode, secret: userMfaSecret });
+        if (!result.valid) {
+            alert('Invalid 2FA Code');
+            setIsConnecting(false);
+            return;
+        }
+        setShowMfaPrompt(false);
+        setMfaCode('');
+    }
     
     setIsConnecting(true);
     
@@ -417,25 +457,50 @@ export default function ExchangeConnect({ onConnect, onDisconnect }: ExchangeCon
               </div>
 
               <div className="flex gap-3 pt-4">
-                <button 
-                  onClick={() => {
-                    setSelectedExchange(null);
-                    setApiKey('');
-                    setApiSecret('');
-                  }}
-                  disabled={!selectedExchange}
-                  className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-colors text-sm"
-                >
-                  Clear
-                </button>
-                <button 
-                  onClick={handleConnect}
-                  disabled={!selectedExchange || !apiKey || !apiSecret || isConnecting}
-                  className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm shadow-lg shadow-indigo-900/20"
-                >
-                  {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlugZap className="w-4 h-4" />}
-                  Connect & Save
-                </button>
+                {showMfaPrompt ? (
+                  <div className="flex-1 flex flex-col gap-2">
+                    <label className="text-xs font-bold text-gray-400 uppercase">Enter 2FA Code</label>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            placeholder="000 000"
+                            value={mfaCode}
+                            onChange={(e) => setMfaCode(e.target.value)}
+                            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500 font-mono text-sm tracking-widest text-center"
+                            maxLength={6}
+                        />
+                        <button 
+                            onClick={handleConnect}
+                            disabled={mfaCode.length < 6 || isConnecting}
+                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg px-4 font-bold transition-colors text-sm"
+                        >
+                            {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify'}
+                        </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button 
+                      onClick={() => {
+                        setSelectedExchange(null);
+                        setApiKey('');
+                        setApiSecret('');
+                      }}
+                      disabled={!selectedExchange}
+                      className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-colors text-sm"
+                    >
+                      Clear
+                    </button>
+                    <button 
+                      onClick={handleConnect}
+                      disabled={!selectedExchange || !apiKey || !apiSecret || isConnecting}
+                      className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm shadow-lg shadow-indigo-900/20"
+                    >
+                      {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlugZap className="w-4 h-4" />}
+                      Connect & Save
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

@@ -4,11 +4,23 @@ import { db, auth, handleFirestoreError, OperationType } from '../services/fireb
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Database, TrendingUp, Search, Plus, Filter, Users, Tag, AlertTriangle } from 'lucide-react';
 
+import { DataSource } from '../types';
+
 interface DataMarketplaceProps {
   addNotification: (title: string, message: string, type: 'success' | 'alert') => void;
+  onAddDataSource?: (source: Partial<DataSource>) => void;
+  onUpdateDataSource?: (source: DataSource) => void;
+  onDeleteDataSource?: (id: string) => void;
+  userDataSources?: DataSource[];
 }
 
-const DataMarketplace: React.FC<DataMarketplaceProps> = ({ addNotification }) => {
+const DataMarketplace: React.FC<DataMarketplaceProps> = ({ 
+  addNotification, 
+  onAddDataSource, 
+  onUpdateDataSource, 
+  onDeleteDataSource,
+  userDataSources = []
+}) => {
     const [listings, setListings] = useState<DataListing[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -196,12 +208,40 @@ const DataMarketplace: React.FC<DataMarketplaceProps> = ({ addNotification }) =>
                                     <div className="flex items-center gap-2 text-xs text-gray-500 font-bold">
                                         <Users className="w-3.5 h-3.5" /> {listing.buyersCount} Subs
                                     </div>
-                                    <button 
-                                        className="px-4 py-2 bg-gray-800 group-hover:bg-fuchsia-600 text-gray-400 group-hover:text-white rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
-                                        onClick={() => addNotification('Subscribed', `You are now simulating subscription to ${listing.title}`, 'success')}
-                                    >
-                                        <Tag className="w-3.5 h-3.5" /> Subscribe
-                                    </button>
+                                    {(() => {
+                                        const isSubscribed = userDataSources.find(ds => ds.marketplaceListingId === listing.id);
+                                        return isSubscribed ? (
+                                            <button 
+                                                className="px-4 py-2 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 hover:border-rose-600 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
+                                                onClick={() => {
+                                                    if (onDeleteDataSource) onDeleteDataSource(isSubscribed.id);
+                                                    addNotification('Unsubscribed', `You have unsubscribed from ${listing.title}`, 'alert');
+                                                }}
+                                            >
+                                                Unsubscribe
+                                            </button>
+                                        ) : (
+                                            <button 
+                                                className="px-4 py-2 bg-gray-800 group-hover:bg-fuchsia-600 text-gray-400 group-hover:text-white rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
+                                                onClick={() => {
+                                                    if (onAddDataSource) {
+                                                        onAddDataSource({
+                                                            name: listing.title,
+                                                            type: 'external_api',
+                                                            status: 'connected',
+                                                            priority: 50,
+                                                            dependencies: [],
+                                                            marketplaceListingId: listing.id,
+                                                            lastData: 'Awaiting data from marketplace...'
+                                                        } as any);
+                                                    }
+                                                    addNotification('Subscribed', `You are now receiving data from ${listing.title}`, 'success');
+                                                }}
+                                            >
+                                                <Tag className="w-3.5 h-3.5" /> Subscribe
+                                            </button>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         ))}

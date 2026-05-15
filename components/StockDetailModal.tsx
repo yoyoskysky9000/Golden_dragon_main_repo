@@ -44,9 +44,15 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({
   const [isConfirming, setIsConfirming] = useState(false); // New confirmation state
   const [tradeSide, setTradeSide] = useState<'buy' | 'sell'>('buy');
   const [tradeShares, setTradeShares] = useState<string>('1');
-  const [orderType, setOrderType] = useState<'market' | 'limit' | 'stop-loss'>('market');
+  const [orderType, setOrderType] = useState<'market' | 'limit' | 'stop-loss' | 'bracket'>('market');
   const [limitPrice, setLimitPrice] = useState<string>('');
   
+  // Advanced Order State
+  const [isPreMarket, setIsPreMarket] = useState(false);
+  const [useBracket, setUseBracket] = useState(false);
+  const [stopLossPriceBracket, setStopLossPriceBracket] = useState<string>('');
+  const [takeProfitPriceBracket, setTakeProfitPriceBracket] = useState<string>('');
+
   // Chart State
   const [chartType, setChartType] = useState<'line' | 'candlestick'>('line');
   
@@ -200,7 +206,12 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({
           type: orderType,
           shares,
           price: isNaN(price) ? 0 : price,
-          isLive: isLiveTrading
+          isLive: isLiveTrading,
+          isPreMarket: isPreMarket,
+          ...(useBracket && {
+              stopLossPrice: parseFloat(stopLossPriceBracket) || undefined,
+              takeProfitPrice: parseFloat(takeProfitPriceBracket) || undefined
+          })
       }, true); // Pass true to skip global confirmation since we just did it inline
       
       setNotification({
@@ -792,6 +803,56 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({
                         </div>
                     </div>
                     
+                    {/* Advanced Order Options Row */}
+                    <div className="mt-4 pt-3 border-t border-gray-800 flex items-center justify-between gap-6">
+                        <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={isPreMarket}
+                                    onChange={(e) => setIsPreMarket(e.target.checked)}
+                                    className="rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-gray-900"
+                                />
+                                Queue for Market Open
+                            </label>
+                            
+                            <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={useBracket}
+                                    onChange={(e) => setUseBracket(e.target.checked)}
+                                    className="rounded border-gray-700 bg-gray-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-gray-900"
+                                />
+                                Auto Bracket (TPSL)
+                            </label>
+                        </div>
+                        
+                        {useBracket && (
+                            <div className="flex flex-1 items-center gap-4 animate-in fade-in duration-200">
+                                <div className="flex-1 flex items-center gap-2 bg-gray-950 rounded-lg border border-gray-800 px-3 py-1.5 focus-within:border-indigo-500">
+                                    <span className="text-[10px] text-emerald-500 uppercase font-bold">Take Profit: $</span>
+                                    <input 
+                                        type="number" 
+                                        placeholder={(execPrice * 1.05).toFixed(2)}
+                                        value={takeProfitPriceBracket}
+                                        onChange={(e) => setTakeProfitPriceBracket(e.target.value)}
+                                        className="bg-transparent text-white font-mono text-xs w-full focus:outline-none"
+                                    />
+                                </div>
+                                <div className="flex-1 flex items-center gap-2 bg-gray-950 rounded-lg border border-gray-800 px-3 py-1.5 focus-within:border-indigo-500">
+                                    <span className="text-[10px] text-rose-500 uppercase font-bold">Stop Loss: $</span>
+                                    <input 
+                                        type="number" 
+                                        placeholder={(execPrice * 0.95).toFixed(2)}
+                                        value={stopLossPriceBracket}
+                                        onChange={(e) => setStopLossPriceBracket(e.target.value)}
+                                        className="bg-transparent text-white font-mono text-xs w-full focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Position/Funds Footer Context */}
                     <div className="flex justify-between mt-3 px-1 text-[10px] text-gray-500 font-medium">
                         <div className="flex gap-4">

@@ -59,19 +59,33 @@ const DataSourceGraph: React.FC<DataSourceGraphProps> = ({ dataSources }) => {
     });
 
     // Determine Single Point of Failure and Redundancy
-    // Single Point of Failure: A node that is the sole dependency for multiple nodes, and has no fallbacks or it's a root node
     nodes.forEach(node => {
+      // Find all links where this node is the dependency (source means data flows FROM it)
       const dependents = links.filter(l => l.source === node.id || (l.source as Node).id === node.id);
-      if (dependents.length > 1) {
+      
+      let soleDependentCount = 0;
+      dependents.forEach(depLink => {
+        const dependentId = typeof depLink.target === 'string' ? depLink.target : (depLink.target as Node).id;
+        // Check how many dependencies this dependent has
+        const dependentDependencies = links.filter(l => l.target === dependentId || (l.target as Node).id === dependentId);
+        if (dependentDependencies.length === 1) {
+            soleDependentCount++;
+        }
+      });
+
+      if (soleDependentCount > 1) {
         node.isSinglePointOfFailure = true;
+      } else {
+        node.isSinglePointOfFailure = false;
       }
       
-      const outgoingLinks = links.filter(l => l.target === node.id || (l.target as Node).id === node.id);
-      // If multiple sources point to this, the sources themselves might be redundant depending on the business logic.
-      // Actually let's define a node as redundant if there are multiple nodes of the SAME TYPE that don't depend on each other?
+      // Node is redundant if there are multiple nodes of the SAME TYPE that don't depend on each other.
+      // Here we just check if there's another node of the same type.
       const sameTypeNodes = nodes.filter(n => n.type === node.type && n.id !== node.id);
       if (sameTypeNodes.length > 0) {
         node.isRedundant = true;
+      } else {
+        node.isRedundant = false;
       }
     });
 
@@ -119,6 +133,35 @@ const DataSourceGraph: React.FC<DataSourceGraphProps> = ({ dataSources }) => {
         .on("drag", dragged)
         .on("end", dragended));
 
+    // Glow filter for SPOF
+    const defs = svg.select('defs');
+    const filter = defs.append('filter')
+      .attr('id', 'glow')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+    filter.append('feGaussianBlur')
+      .attr('stdDeviation', '4')
+      .attr('result', 'coloredBlur');
+    const feMerge = filter.append('feMerge');
+    feMerge.append('feMergeNode').attr('in', 'coloredBlur');
+    feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+    // Add glowing halo for SPOF
+    nodeGroup.append('circle')
+      .filter(d => d.isSinglePointOfFailure)
+      .attr('r', d => d.radius + 6)
+      .attr('fill', 'none')
+      .attr('stroke', '#f43f5e')
+      .attr('stroke-width', 2)
+      .attr('filter', 'url(#glow)')
+      .append('animate')
+      .attr('attributeName', 'opacity')
+      .attr('values', '0.4;1;0.4')
+      .attr('dur', '1.5s')
+      .attr('repeatCount', 'indefinite');
+
     nodeGroup.append('circle')
       .attr('r', d => d.radius)
       .attr('fill', d => {
@@ -126,19 +169,26 @@ const DataSourceGraph: React.FC<DataSourceGraphProps> = ({ dataSources }) => {
         if (d.status === 'disconnected') return '#f59e0b'; // Amber
         return '#3b82f6'; // Blue
       })
-      .attr('stroke', d => d.isSinglePointOfFailure ? '#f43f5e' : (d.isRedundant ? '#eab308' : '#1e3a8a'))
-      .attr('stroke-width', d => d.isSinglePointOfFailure ? 4 : (d.isRedundant ? 3 : 1))
+      .attr('stroke', d => d.isSinglePointOfFailure ? '#be123c' : (d.isRedundant ? '#ca8a04' : '#1e3a8a'))
+      .attr('stroke-width', d => d.isSinglePointOfFailure ? 2 : (d.isRedundant ? 2 : 1))
       .attr('stroke-dasharray', d => d.isRedundant ? '4,4' : 'none')
       .style('cursor', 'pointer');
       
-    // Pulse animation for SPOF
-    nodeGroup.selectAll('circle')
-      .filter((d: any) => d.isSinglePointOfFailure)
-      .append('animate')
-      .attr('attributeName', 'opacity')
-      .attr('values', '0.5;1;0.5')
-      .attr('dur', '1.5s')
-      .attr('repeatCount', 'indefinite');
+    // Add Warning Text/Icon for SPOF
+    nodeGroup.append('text')
+      .filter(d => d.isSinglePointOfFailure)
+      .text('⚠️')
+      .attr('dy', d => -d.radius - 5)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', '16px');
+
+    // Add Redundancy Text/Icon for redundant nodes
+    nodeGroup.append('text')
+      .filter(d => d.isRedundant && !d.isSinglePointOfFailure)
+      .text('🔁')
+      .attr('dy', d => -d.radius - 5)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', '12px');
 
     nodeGroup.append('text')
       .text(d => d.name)

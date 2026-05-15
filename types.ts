@@ -67,11 +67,14 @@ export interface ActiveOrder {
   id: string;
   symbol: string;
   side: 'buy' | 'sell';
-  type: 'limit' | 'stop-loss';
+  type: 'market' | 'limit' | 'stop-loss' | 'take-profit' | 'bracket';
   shares: number;
   price: number; // Represents limitPrice or stopPrice
   timestamp: number;
   status: 'open' | 'filled' | 'cancelled';
+  stopLoss?: number;
+  takeProfit?: number;
+  isPreMarket?: boolean;
 }
 
 export interface BaseDataSource {
@@ -83,6 +86,7 @@ export interface BaseDataSource {
   lastData?: string;
   priority: number;
   dependencies?: string[];
+  marketplaceListingId?: string;
 }
 
 export interface RealtimeDataSource extends BaseDataSource {
@@ -133,10 +137,11 @@ export interface AIAgent {
   trainingDataSources: { id: string; priority: number }[];
   systemPrompt: string;
   parentAgentId: string | null; // For hierarchy
-  status: 'idle' | 'training' | 'analyzing' | 'ready' | 'error';
+  status: 'idle' | 'training' | 'analyzing' | 'ready' | 'error' | 'paused';
   accuracyScore: number;
   lastTrainedAt?: number;
   trainingProgress?: number;
+  estimatedTimeRemaining?: number; // In seconds
 }
 
 export interface TradingBotSource {
@@ -165,6 +170,7 @@ export interface TradingBot {
       indicator: string;
       condition: string;
       value: string;
+      logic?: 'AND' | 'OR';
     }[];
   };
   aiDescription?: string;
@@ -244,6 +250,8 @@ export interface UserAccount {
   stakedAmount: number;
   gasBalance: number;
   isSellingData: boolean;
+  mfaEnabled?: boolean;
+  mfaSecret?: string;
   createdAt: number;
   updatedAt: number;
 }
