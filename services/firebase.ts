@@ -74,7 +74,34 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// User Profile logic
+export const createDataListing = async (
+    sellerId: string, 
+    listingData: Partial<DataListing>
+) => {
+    if (typeof listingData.price !== 'number' || listingData.price <= 0) {
+        throw new Error("Price must be a positive number.");
+    }
+    if (listingData.currency !== 'USD' && listingData.currency !== 'GAS_CO1N') {
+        throw new Error("Currency must be either USD or GAS_CO1N.");
+    }
+    if (listingData.description && listingData.description.length > 500) {
+        listingData.description = listingData.description.substring(0, 500);
+    }
+
+    const listingRef = doc(collection(db, 'dataMarketplace'));
+    try {
+        await setDoc(listingRef, {
+            ...listingData,
+            sellerId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+        });
+        return listingRef.id;
+    } catch (e) {
+        handleFirestoreError(e, OperationType.CREATE, `dataMarketplace/${listingRef.id}`);
+    }
+};
+
 export const ensureUserAccount = async (uid: string, email?: string | null) => {
     const userRef = doc(db, 'users', uid);
     try {

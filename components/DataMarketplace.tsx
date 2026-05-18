@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { DataListing } from '../types';
-import { db, auth, handleFirestoreError, OperationType } from '../services/firebase';
+import { db, auth, handleFirestoreError, OperationType, createDataListing } from '../services/firebase';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Database, TrendingUp, Search, Plus, Filter, Users, Tag, AlertTriangle } from 'lucide-react';
 
@@ -29,7 +29,7 @@ const DataMarketplace: React.FC<DataMarketplaceProps> = ({
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [price, setPrice] = useState(10);
-    const [currency, setCurrency] = useState<'USD'|'GAS_COIN'>('GAS_COIN');
+    const [currency, setCurrency] = useState<'USD'|'GAS_CO1N'>('GAS_CO1N');
 
     useEffect(() => {
         // We do not require auth to list active items based on our rules, but we require auth to actually interact.
@@ -63,16 +63,13 @@ const DataMarketplace: React.FC<DataMarketplaceProps> = ({
         }
         
         try {
-            await addDoc(collection(db, 'dataMarketplace'), {
-                sellerId: user.uid,
+            await createDataListing(user.uid, {
                 title,
                 description,
                 price,
                 currency,
                 status: 'active',
-                buyersCount: 0,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
+                buyersCount: 0
             });
             setShowCreate(false);
             setTitle('');
@@ -178,10 +175,10 @@ const DataMarketplace: React.FC<DataMarketplaceProps> = ({
                                     <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Currency</label>
                                     <select 
                                         value={currency} 
-                                        onChange={(e) => setCurrency(e.target.value as 'USD' | 'GAS_COIN')}
+                                        onChange={(e) => setCurrency(e.target.value as 'USD' | 'GAS_CO1N')}
                                         className="w-full bg-[#050510] border border-gray-800 rounded-lg p-3 text-white focus:outline-none focus:border-fuchsia-500 transition-colors"
                                     >
-                                        <option value="GAS_COIN">GAS COIN</option>
+                                        <option value="GAS_CO1N">GAS CO1N</option>
                                         <option value="USD">USD</option>
                                     </select>
                                 </div>

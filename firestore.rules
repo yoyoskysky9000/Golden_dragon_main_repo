@@ -104,5 +104,8 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() && existing().sellerId == request.auth.uid;
     }
+    match /trades/{tradeId} {
+      allow read, write: if true;
+    }
   }
 }

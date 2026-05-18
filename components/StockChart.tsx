@@ -301,7 +301,7 @@ const StockChart: React.FC<StockChartProps> = ({ data, color, referenceLines = [
 
     const rsiSeries = rsiChart.addSeries(LineSeries, {
         color: '#f97316',
-        lineWidth: 1.5,
+        lineWidth: 2,
         autoscaleInfoProvider: () => ({
             priceRange: {
                 minValue: 0,
@@ -383,7 +383,7 @@ const StockChart: React.FC<StockChartProps> = ({ data, color, referenceLines = [
 
     if (showSMA) {
         if (!smaSeriesRef.current && chartRef.current) {
-            smaSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#818cf8', lineWidth: 1.5, crosshairMarkerVisible: false });
+            smaSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#818cf8', lineWidth: 2, crosshairMarkerVisible: false });
         }
         const smaData = uniqueMwData.map((d, i) => ({ time: d.time, value: chartProcessedData[i].sma })).filter(d => d.value !== null) as LineData[];
         smaSeriesRef.current?.setData(smaData);
@@ -394,7 +394,7 @@ const StockChart: React.FC<StockChartProps> = ({ data, color, referenceLines = [
 
     if (showSMA50) {
         if (!sma50SeriesRef.current && chartRef.current) {
-            sma50SeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1.5, crosshairMarkerVisible: false });
+            sma50SeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 2, crosshairMarkerVisible: false });
         }
         const sma50Data = uniqueMwData.map((d, i) => ({ time: d.time, value: chartProcessedData[i].sma50 })).filter(d => d.value !== null) as LineData[];
         sma50SeriesRef.current?.setData(sma50Data);
@@ -405,7 +405,7 @@ const StockChart: React.FC<StockChartProps> = ({ data, color, referenceLines = [
     
     if (showEMA) {
         if (!emaSeriesRef.current && chartRef.current) {
-            emaSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#c084fc', lineWidth: 1.5, crosshairMarkerVisible: false });
+            emaSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#c084fc', lineWidth: 2, crosshairMarkerVisible: false });
         }
         const emaData = uniqueMwData.map((d, i) => ({ time: d.time, value: chartProcessedData[i].ema })).filter(d => d.value !== null) as LineData[];
         emaSeriesRef.current?.setData(emaData);
@@ -416,7 +416,7 @@ const StockChart: React.FC<StockChartProps> = ({ data, color, referenceLines = [
 
     if (showEMA20) {
         if (!ema20SeriesRef.current && chartRef.current) {
-            ema20SeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#e879f9', lineWidth: 1.5, crosshairMarkerVisible: false });
+            ema20SeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#e879f9', lineWidth: 2, crosshairMarkerVisible: false });
         }
         const ema20Data = uniqueMwData.map((d, i) => ({ time: d.time, value: chartProcessedData[i].ema20 })).filter(d => d.value !== null) as LineData[];
         ema20SeriesRef.current?.setData(ema20Data);

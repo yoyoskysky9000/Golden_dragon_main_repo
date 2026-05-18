@@ -18,10 +18,13 @@ interface StockDetailModalProps {
   onPlaceOrder: (order: { 
     symbol: string, 
     side: 'buy' | 'sell', 
-    type: 'market' | 'limit' | 'stop-loss', 
+    type: 'market' | 'limit' | 'stop-loss' | 'take-profit' | 'bracket', 
     shares: number, 
     price: number,
-    isLive: boolean 
+    isLive: boolean,
+    isPreMarket?: boolean,
+    stopLossPrice?: number,
+    takeProfitPrice?: number
   }, skipConfirmation?: boolean) => void;
 }
 

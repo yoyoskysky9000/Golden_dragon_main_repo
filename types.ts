@@ -262,7 +262,7 @@ export interface DataListing {
   title: string;
   description: string;
   price: number;
-  currency: 'USD' | 'GAS_COIN';
+  currency: 'USD' | 'GAS_COIN' | 'GAS_CO1N';
   dataSourceType?: string;
   status: 'active' | 'suspended' | 'sold_out';
   buyersCount: number;

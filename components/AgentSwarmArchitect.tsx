@@ -7,6 +7,7 @@ import {
 import { AIAgent, DataSource, AgentTask } from '../types';
 import { simulateAgentTraining } from '../services/geminiService';
 import SwarmGraph from './SwarmGraph';
+import AgentChat from './AgentChat';
 
 interface Props {
   agents: AIAgent[];
@@ -20,7 +21,7 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [isSwarmModeActive, setIsSwarmModeActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [viewMode, setViewMode] = useState<'agents' | 'taskGraph'>('agents');
+  const [viewMode, setViewMode] = useState<'agents' | 'taskGraph' | 'chat'>('agents');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
@@ -126,7 +127,7 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
              }
              return { 
                ...a, 
-               status: 'ready', 
+               status: 'ready' as const, 
                trainingProgress: 100,
                estimatedTimeRemaining: 0,
                accuracyScore: Math.min(99.9, a.accuracyScore + accuracyBoost),
@@ -143,15 +144,15 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
   }, [agents.some(a => a.status === 'training')]);
 
   const handleStartTraining = (agentId: string) => {
-    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'training', trainingProgress: a.trainingProgress || 0 } : a));
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'training' as const, trainingProgress: a.trainingProgress || 0 } : a));
   };
 
   const handlePauseTraining = (agentId: string) => {
-    setAgents(prev => prev.map(a => a.id === agentId && a.status === 'training' ? { ...a, status: 'paused' } : a));
+    setAgents(prev => prev.map(a => a.id === agentId && a.status === 'training' ? { ...a, status: 'paused' as const } : a));
   };
 
   const handleResetTraining = (agentId: string) => {
-    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'idle', trainingProgress: 0, estimatedTimeRemaining: 0 } : a));
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'idle' as const, trainingProgress: 0, estimatedTimeRemaining: 0 } : a));
   };
 
   // Build tree organization
@@ -276,18 +277,24 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
       <div className="w-80 border-r border-gray-800 flex flex-col bg-gray-900/50">
         <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900 sticky top-0 z-10">
           <div>
-            <div className="flex gap-4 mb-2">
+            <div className="flex gap-4 mb-2 border-b border-gray-800">
               <button 
                 onClick={() => setViewMode('agents')}
-                className={`text-xs font-bold uppercase tracking-wider pb-1 border-b-2 transition-colors ${viewMode === 'agents' ? 'text-white border-purple-500' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                className={`text-xs font-bold uppercase tracking-wider pb-2 border-b-2 transition-colors ${viewMode === 'agents' ? 'text-white border-purple-500' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
               >
                 Nodes
               </button>
               <button 
                 onClick={() => setViewMode('taskGraph')}
-                className={`text-xs font-bold uppercase tracking-wider pb-1 border-b-2 transition-colors ${viewMode === 'taskGraph' ? 'text-white border-purple-500' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                className={`text-xs font-bold uppercase tracking-wider pb-2 border-b-2 transition-colors ${viewMode === 'taskGraph' ? 'text-white border-purple-500' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
               >
                 DAG
+              </button>
+              <button 
+                onClick={() => setViewMode('chat')}
+                className={`text-xs font-bold uppercase tracking-wider pb-2 border-b-2 transition-colors ${viewMode === 'chat' ? 'text-white border-purple-500' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+              >
+                Data Trading & Chat
               </button>
             </div>
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
@@ -341,7 +348,9 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
       </div>
 
       {/* Right Content Area */}
-      {viewMode === 'taskGraph' ? (
+      {viewMode === 'chat' ? (
+        <AgentChat agents={agents} />
+      ) : viewMode === 'taskGraph' ? (
         <div className="flex-1 relative bg-gray-900 flex">
           <div className="flex-1 relative">
             {setTasks && (
@@ -435,6 +444,38 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
                     <option value="completed">Completed</option>
                     <option value="failed">Failed</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Data Source Dependencies</label>
+                  <div className="space-y-2">
+                    {dataSources.length === 0 ? (
+                      <p className="text-gray-500 text-xs italic">No data sources available.</p>
+                    ) : (
+                      dataSources.map(ds => {
+                        const isSelected = selectedTask.dataSources?.find(tds => tds.id === ds.id);
+                        return (
+                          <label key={ds.id} className="flex items-center gap-2 text-sm text-gray-300">
+                            <input 
+                              type="checkbox"
+                              checked={!!isSelected}
+                              onChange={(e) => {
+                                const current = selectedTask.dataSources || [];
+                                let newSources;
+                                if (e.target.checked) {
+                                  newSources = [...current, { id: ds.id, priority: 50 }];
+                                } else {
+                                  newSources = current.filter(tds => tds.id !== ds.id);
+                                }
+                                setTasks(tasks.map(t => t.id === selectedTask.id ? { ...t, dataSources: newSources } : t));
+                              }}
+                              className="rounded border-gray-700 bg-gray-900 text-purple-600 focus:ring-purple-500"
+                            />
+                            {ds.name}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

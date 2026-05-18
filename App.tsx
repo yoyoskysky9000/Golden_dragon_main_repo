@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StockData, PortfolioPosition, AppView, ActiveOrder, TradingBot, CopyTrader, AIAgent, DataSource, AgentTask } from './types';
 import { generateInitialData, simulateTick, generateMockTraders } from './services/mockMarket';
 import StockChart from './components/StockChart';
@@ -45,6 +45,7 @@ import {
   BellRing,
   Trash2,
   Power,
+  Plus,
   Plug,
   PlugZap,
   AlertTriangle,
@@ -82,7 +83,7 @@ interface Notification {
 interface PendingOrder {
   symbol: string;
   side: 'buy' | 'sell';
-  type: 'market' | 'limit' | 'stop-loss';
+  type: 'market' | 'limit' | 'stop-loss' | 'take-profit' | 'bracket';
   shares: number;
   price: number;
   estimatedTotal: number;
@@ -94,6 +95,10 @@ const DragonLogo = ({ className }: { className?: string }) => (
     <path d="M12 2L13.5 6L17 7L13.5 9L12 13L10.5 9L7 7L10.5 6L12 2Z" fill="#FFF" fillOpacity="0.3"/>
   </svg>
 );
+
+export const globalNotify = (title: string, message: string, type: 'success' | 'alert' = 'alert') => {
+  window.dispatchEvent(new CustomEvent('app-notify', { detail: { title, message, type } }));
+};
 
 function App() {
   const [stocks, setStocks] = useState<StockData[]>(() => generateInitialData());
@@ -119,6 +124,11 @@ function App() {
     const saved = localStorage.getItem('OMNITRADE_ORDERS');
     return saved ? JSON.parse(saved) : [];
   });
+  const [priceAlerts, setPriceAlerts] = useState<{id: string, symbol: string, targetPrice: number, condition: 'above' | 'below', isFired: boolean}[]>(() => {
+    const saved = localStorage.getItem('OMNITRADE_PRICE_ALERTS');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [isAlertsModalOpen, setIsAlertsModalOpen] = useState(false);
   const generateBotHistory = (basePnl: number) => {
     const history = [];
     const now = Date.now();
@@ -176,10 +186,20 @@ function App() {
       id: 'task_1',
       title: 'Analyze Coinbase Earnings',
       description: 'Review the latest Q3 earnings report from Coinbase and adjust quant models accordingly.',
-      assignedAgentId: 'agent_master_0',
+      assignedAgentId: 'agent_quant_dev',
       deadline: new Date(Date.now() + 86400000).toISOString().split('T')[0],
       status: 'todo',
       createdAt: Date.now()
+    },
+    {
+      id: 'task_2',
+      title: 'Analyze Market Sentiment',
+      description: 'Aggregate social media and news feeds to score overall market sentiment.',
+      assignedAgentId: 'agent_master_0',
+      deadline: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+      status: 'todo',
+      createdAt: Date.now(),
+      dataSources: [{ id: 'ds_crypto_market_data', priority: 100 }]
     }
   ]);
 
@@ -371,7 +391,7 @@ function App() {
   });
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [activeView, setActiveView] = useState<AppView>(AppView.STRATEGY_EXPLORER);
+  const [activeView, setActiveView] = useState<AppView>(AppView.DATA_SOURCES);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
   const [modalStock, setModalStock] = useState<StockData | null>(null);
@@ -407,8 +427,42 @@ function App() {
   };
 
   const addNotification = useCallback((title: string, message: string, type: 'success' | 'alert' = 'alert') => {
-      setNotifications(prev => [...prev, { id: Math.random().toString(), title, message, type }]);
+      const id = Math.random().toString();
+      setNotifications(prev => [...prev, { id, title, message, type }]);
+      setTimeout(() => {
+          setNotifications(prev => prev.filter(n => n.id !== id));
+      }, 5000);
   }, []);
+
+  useEffect(() => {
+    const handleGlobalNotify = (e: CustomEvent) => {
+      addNotification(e.detail.title, e.detail.message, e.detail.type);
+    };
+    window.addEventListener('app-notify', handleGlobalNotify as EventListener);
+    return () => window.removeEventListener('app-notify', handleGlobalNotify as EventListener);
+  }, [addNotification]);
+
+  const previousBotStatuses = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    bots.forEach(bot => {
+      const prevStatus = previousBotStatuses.current[bot.id];
+      if (bot.status === 'error' && prevStatus !== 'error') {
+        // When going from any state (or initial state) to 'error'
+        if (prevStatus !== undefined) {
+          addNotification(
+            'Bot Alert',
+            `Bot ${bot.name} encountered an error: ${bot.errorMessage || 'Unknown error'}`,
+            'alert'
+          );
+        } else {
+           // Optionally, if we don't want to alert on initial load if it's already an error:
+           // do nothing, but set the previous status.
+        }
+      }
+      previousBotStatuses.current[bot.id] = bot.status;
+    });
+  }, [bots, addNotification]);
 
   const handleOpenDetails = async (symbol: string) => {
     // Show a loading state if we had a loading spinner, but we can just set it straight away or use placeholder
@@ -446,6 +500,22 @@ function App() {
     }));
   }, [dataSources]);
 
+  const botsRef = useRef(bots);
+  const stocksRef = useRef(stocks);
+  const dataSourcesRef = useRef(effectiveDataSources);
+  const cashBalanceRef = useRef(cashBalance);
+  const portfolioRef = useRef(portfolio);
+  const isSimConnectedRef = useRef(isSimConnected);
+
+  useEffect(() => {
+    botsRef.current = bots;
+    stocksRef.current = stocks;
+    dataSourcesRef.current = effectiveDataSources;
+    cashBalanceRef.current = cashBalance;
+    portfolioRef.current = portfolio;
+    isSimConnectedRef.current = isSimConnected;
+  }, [bots, stocks, effectiveDataSources, cashBalance, portfolio, isSimConnected]);
+
   useEffect(() => {
     if (isSimConnected) {
       localStorage.setItem('OMNITRADE_PORTFOLIO', JSON.stringify(portfolio));
@@ -456,7 +526,38 @@ function App() {
     localStorage.setItem('OMNITRADE_ORDERS', JSON.stringify(activeOrders));
     localStorage.setItem('OMNITRADE_BOTS', JSON.stringify(bots));
     localStorage.setItem('OMNITRADE_COPY_TRADERS', JSON.stringify(copyTraders));
-  }, [portfolio, cashBalance, realizedPL, activeOrders, isSimConnected, bots, copyTraders]);
+    localStorage.setItem('OMNITRADE_PRICE_ALERTS', JSON.stringify(priceAlerts));
+  }, [portfolio, cashBalance, realizedPL, activeOrders, isSimConnected, bots, copyTraders, priceAlerts]);
+
+  useEffect(() => {
+    if (priceAlerts.length === 0) return;
+    
+    let updatedAlerts = false;
+    const newAlerts = priceAlerts.map(alert => {
+      if (alert.isFired) return alert;
+      
+      const stock = stocks.find(s => s.symbol === alert.symbol);
+      if (!stock) return alert;
+      
+      if (alert.condition === 'above' && stock.price >= alert.targetPrice) {
+        addNotification("Price Alert", `${stock.symbol} is above ${formatMoney(alert.targetPrice)}. Current: ${formatMoney(stock.price)}`, 'success');
+        updatedAlerts = true;
+        return { ...alert, isFired: true };
+      }
+      
+      if (alert.condition === 'below' && stock.price <= alert.targetPrice) {
+        addNotification("Price Alert", `${stock.symbol} is below ${formatMoney(alert.targetPrice)}. Current: ${formatMoney(stock.price)}`, 'success');
+        updatedAlerts = true;
+        return { ...alert, isFired: true };
+      }
+      
+      return alert;
+    });
+    
+    if (updatedAlerts) {
+      setPriceAlerts(newAlerts);
+    }
+  }, [stocks, priceAlerts, addNotification]);
 
   useEffect(() => {
     let ws: WebSocket;
@@ -553,10 +654,10 @@ function App() {
         if (agent.role === 'Quant Developer' && agent.trainingDataSources.some(ds => ds.id === '3')) {
           if (newsDataSource && newsDataSource.effectiveStatus === 'error' && agent.status !== 'error' && agent.status !== 'paused') {
             changed = true;
-            return { ...agent, status: 'paused' };
+            return { ...agent, status: 'paused' as const };
           } else if (newsDataSource && newsDataSource.effectiveStatus === 'connected' && agent.status === 'paused') {
             changed = true;
-            return { ...agent, status: 'ready' };
+            return { ...agent, status: 'ready' as const };
           }
         }
         return agent;
@@ -568,12 +669,18 @@ function App() {
   // Auto-AI Trading Loop
   useEffect(() => {
     const autoLoop = setInterval(async () => {
-      const activeAutoBots = bots.filter(b => b.status === 'active' && b.autoMode);
+      const currentBots = botsRef.current;
+      const currentStocks = stocksRef.current;
+      const currentSources = dataSourcesRef.current;
+      const currentCash = cashBalanceRef.current;
+      const currentPortfolio = portfolioRef.current;
+
+      const activeAutoBots = currentBots.filter(b => b.status === 'active' && b.autoMode);
       for (const bot of activeAutoBots) {
-        const stock = stocks.find(s => s.symbol === bot.symbol);
+        const stock = currentStocks.find(s => s.symbol === bot.symbol);
         if (stock) {
           // Filter data sources based on bot's selection, prioritize them, and ensure they are connected
-          const selectedSources = effectiveDataSources
+          const selectedSources = currentSources
             .filter(ds => ds.effectiveStatus === 'connected')
             .filter(ds => bot.dataSources.some(s => s.id === ds.id))
             .map(ds => {
@@ -645,7 +752,7 @@ function App() {
       }
     }, 15000); // Check every 15 seconds
     return () => clearInterval(autoLoop);
-  }, [bots, stocks, effectiveDataSources, cashBalance, portfolio]);
+  }, []);
 
   // Order Execution Loop for Limit and Stop-Loss
   useEffect(() => {
@@ -743,11 +850,14 @@ function App() {
   // Autonomous Optimization Loop
   useEffect(() => {
     const optimizationLoop = setInterval(async () => {
-      const activeAutoBots = bots.filter(b => b.status === 'active' && b.autoOptimize);
+      const currentBots = botsRef.current;
+      const currentStocks = stocksRef.current;
+
+      const activeAutoBots = currentBots.filter(b => b.status === 'active' && b.autoOptimize);
       for (const bot of activeAutoBots) {
         // Only optimize if bot has accumulated at least 5 trades or enough time has passed (1 hour)
         if (bot.trades >= 5 || !bot.lastOptimizedAt || Date.now() - bot.lastOptimizedAt > 3600000) {
-          const stock = stocks.find(s => s.symbol === bot.symbol);
+          const stock = currentStocks.find(s => s.symbol === bot.symbol);
           if (stock) {
             try {
                 const result = await optimizeStrategy(bot, stock, { pnl: bot.pnl, trades: bot.trades });
@@ -790,7 +900,7 @@ function App() {
       }
     }, 30000); // Check for optimization every 30 seconds
     return () => clearInterval(optimizationLoop);
-  }, [bots, stocks]);
+  }, [addNotification]);
 
 
   const handleAddDataSource = async (source: Partial<DataSource>) => {
@@ -874,13 +984,13 @@ function App() {
       shares: number, price?: number, isLive?: boolean,
       isPreMarket?: boolean, stopLossPrice?: number, takeProfitPrice?: number
   }, skipConfirmation?: boolean) => {
-    if (!isSimConnected) {
+    if (!isSimConnectedRef.current) {
         addNotification("Trade Failed", "Please connect an exchange first.", 'alert');
         setActiveView(AppView.CONNECTIONS);
         return;
     }
     
-    const stock = stocks.find(s => s.symbol === order.symbol);
+    const stock = stocksRef.current.find(s => s.symbol === order.symbol);
     if (!stock) {
         addNotification("Trade Failed", "Invalid stock symbol.", 'alert');
         return;
@@ -907,12 +1017,12 @@ function App() {
 
     // Validation
     if (order.side === 'buy') {
-        if (totalCost > cashBalance) {
-            addNotification("Insufficient Funds", `Required: ${formatMoney(totalCost)}. Available: ${formatMoney(cashBalance)}`, 'alert');
+        if (totalCost > cashBalanceRef.current) {
+            addNotification("Insufficient Funds", `Required: ${formatMoney(totalCost)}. Available: ${formatMoney(cashBalanceRef.current)}`, 'alert');
             return;
         }
     } else {
-        const position = portfolio.find(p => p.symbol === order.symbol);
+        const position = portfolioRef.current.find(p => p.symbol === order.symbol);
         if (!position || position.shares < order.shares) {
             addNotification("Insufficient Shares", `Cannot sell ${order.shares} shares. You own ${position?.shares || 0}.`, 'alert');
             return;
@@ -1049,8 +1159,13 @@ function App() {
       {/* Toast Notifications */}
       <div className="absolute bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
           {notifications.map(note => (
-              <div key={note.id} className="pointer-events-auto bg-gray-900/90 backdrop-blur-sm border border-gray-800 border-l-2 border-l-amber-500 text-white p-2.5 rounded shadow-2xl flex flex-col min-w-[200px] max-w-[250px] animate-in slide-in-from-bottom-5 fade-in duration-300">
-                  <span className="font-bold text-[10px] uppercase tracking-wider mb-0.5 text-amber-500">{note.title}</span>
+              <div key={note.id} className={`pointer-events-auto bg-gray-900/90 backdrop-blur-sm border border-gray-800 border-l-2 ${note.type === 'success' ? 'border-l-emerald-500' : 'border-l-rose-500'} text-white p-2.5 rounded shadow-2xl flex flex-col min-w-[200px] max-w-[250px] animate-in slide-in-from-bottom-5 fade-in duration-300`}>
+                  <div className="flex justify-between items-start gap-2">
+                      <span className={`font-bold text-[10px] uppercase tracking-wider mb-0.5 ${note.type === 'success' ? 'text-emerald-500' : 'text-rose-500'}`}>{note.title}</span>
+                      <button onClick={() => setNotifications(prev => prev.filter(n => n.id !== note.id))} className="text-gray-500 hover:text-white transition-colors cursor-pointer">
+                          <XCircle className="w-3 h-3" />
+                      </button>
+                  </div>
                   <span className="text-[10px] text-gray-400 leading-tight">{note.message}</span>
               </div>
           ))}
@@ -1206,6 +1321,67 @@ function App() {
                 <span className="text-gray-400">Net Worth</span>
                 <span className="font-mono font-medium text-amber-400">{formatMoney(totalEquity)}</span>
             </div>
+          </div>
+          <div className="flex items-center gap-4 relative">
+             <button onClick={() => setIsAlertsModalOpen(!isAlertsModalOpen)} className="p-2 text-gray-400 hover:text-white transition-colors relative">
+                 <Bell className="w-5 h-5" />
+                 {priceAlerts.filter(a => !a.isFired).length > 0 && (
+                     <span className="absolute top-1 right-2 w-2 h-2 bg-amber-500 rounded-full border border-gray-900"></span>
+                 )}
+             </button>
+             {isAlertsModalOpen && (
+                 <div className="absolute top-12 right-0 w-[400px] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-20">
+                     <div className="p-4 border-b border-gray-800 bg-gray-950/50">
+                         <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><BellRing className="w-4 h-4 text-amber-500"/> Price Alerts</h3>
+                         <div className="flex gap-2">
+                             <select id="alertSymbol" className="bg-gray-950 border border-gray-800 text-white text-sm rounded outline-none focus:border-amber-500 px-2 py-1.5 flex-1">
+                                {stocks.map(s => <option key={s.symbol} value={s.symbol}>{s.symbol} ({formatMoney(s.price)})</option>)}
+                             </select>
+                             <select id="alertCondition" className="bg-gray-950 border border-gray-800 text-white text-sm rounded outline-none focus:border-amber-500 px-2 py-1.5 w-24">
+                                <option value="above">Above</option>
+                                <option value="below">Below</option>
+                             </select>
+                             <input id="alertPrice" type="number" step="0.01" className="bg-gray-950 border border-gray-800 text-white text-sm rounded outline-none focus:border-amber-500 px-2 py-1.5 w-24" placeholder="Price" />
+                             <button onClick={() => {
+                                 const symbol = (document.getElementById('alertSymbol') as HTMLSelectElement).value;
+                                 const condition = (document.getElementById('alertCondition') as HTMLSelectElement).value as 'above'|'below';
+                                 const price = parseFloat((document.getElementById('alertPrice') as HTMLInputElement).value);
+                                 if (price > 0) {
+                                     setPriceAlerts(prev => [...prev, { id: Math.random().toString(), symbol, targetPrice: price, condition, isFired: false }]);
+                                     addNotification("Alert Added", `Will notify when ${symbol} goes ${condition} ${formatMoney(price)}`, 'success');
+                                     (document.getElementById('alertPrice') as HTMLInputElement).value = '';
+                                 }
+                             }} className="bg-amber-500 hover:bg-amber-400 text-gray-950 p-2 rounded transition-colors">
+                                 <Plus className="w-4 h-4" />
+                             </button>
+                         </div>
+                     </div>
+                     <div className="max-h-60 overflow-y-auto">
+                        {priceAlerts.length === 0 ? (
+                            <div className="p-6 text-center text-sm text-gray-500">No active alerts set</div>
+                        ) : (
+                            priceAlerts.map(alert => (
+                                <div key={alert.id} className="p-3 border-b border-gray-800/50 hover:bg-gray-800/20 flex justify-between items-center text-sm transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-2 h-2 rounded-full ${alert.isFired ? 'bg-gray-600' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]'}`}></div>
+                                        <div>
+                                            <span className="font-bold text-white">{alert.symbol}</span>
+                                            <span className="text-gray-400 mx-2 text-xs uppercase tracking-wider">{alert.condition}</span>
+                                            <span className="text-amber-400 font-mono">{formatMoney(alert.targetPrice)}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {alert.isFired && <span className="text-[10px] uppercase font-bold tracking-wider text-green-500 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">Triggered</span>}
+                                        <button onClick={() => setPriceAlerts(prev => prev.filter(a => a.id !== alert.id))} className="text-gray-600 hover:text-red-400 transition-colors p-1">
+                                           <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                     </div>
+                 </div>
+             )}
           </div>
         </header>
 

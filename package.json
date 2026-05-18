@@ -21,6 +21,7 @@
     "d3": "^7.9.0",
     "express": "^5.2.1",
     "firebase": "^12.12.1",
+    "firebase-admin": "^13.10.0",
     "framer-motion": "^12.38.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.555.0",

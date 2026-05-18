@@ -18,7 +18,7 @@ import {
   LineChart as LineChartIcon
 } from 'lucide-react';
 import { StockData, TradingBot } from '../types';
-import { backtestStrategy, optimizeStrategy, generateAIStrategy } from '../services/geminiService';
+import { backtestStrategy, optimizeStrategy, generateAIStrategy, tuneParameters } from '../services/geminiService';
 import { 
   LineChart, 
   Line, 
@@ -49,6 +49,8 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationResult, setOptimizationResult] = useState<any>(null);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [isTuning, setIsTuning] = useState(false);
+  const [tuningResult, setTuningResult] = useState<any>(null);
 
   const selectedStock = stocks.find(s => s.symbol === selectedSymbol) || stocks[0];
 
@@ -71,6 +73,8 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
     if (!selectedStock) return;
     setIsBacktesting(true);
     setBacktestResult(null);
+    setOptimizationResult(null);
+    setTuningResult(null);
     
     // Simulate real history with some added metadata for the AI
     const history = selectedStock.history.map(h => ({
@@ -87,6 +91,7 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
     if (!selectedStock) return;
     setIsOptimizing(true);
     setOptimizationResult(null);
+    setTuningResult(null);
 
     // Mock bot to reuse optimization service
     const mockBot: TradingBot = {
@@ -118,6 +123,36 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
     if (optimizationResult?.strategy) {
       setStrategy(optimizationResult.strategy);
       setOptimizationResult(null);
+    }
+  };
+
+  const handleTuneParameters = async () => {
+    if (!selectedStock || !backtestResult) return;
+    setIsTuning(true);
+    setTuningResult(null);
+    setOptimizationResult(null);
+
+    try {
+      const result = await tuneParameters(selectedSymbol, strategy, backtestResult, selectedStock);
+      if (result) {
+        setTuningResult(result);
+      }
+    } catch (e) {
+      console.error("Tuning failed", e);
+    } finally {
+      setIsTuning(false);
+    }
+  };
+
+  const applyTuning = () => {
+    if (tuningResult) {
+      setStrategy({
+        indicator: tuningResult.indicator,
+        condition: tuningResult.condition,
+        value: tuningResult.value,
+        action: tuningResult.action
+      });
+      setTuningResult(null);
     }
   };
 
@@ -241,14 +276,26 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                   Run Backtest Simulation
                 </button>
                 
-                <button 
-                  onClick={handleOptimize}
-                  disabled={isOptimizing}
-                  className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 py-4 rounded-xl font-bold border border-gray-700 transition-all flex items-center justify-center gap-2"
-                >
-                  {isOptimizing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5 text-amber-500" />}
-                  AI Optimization Suggestion
-                </button>
+                {backtestResult && (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={handleOptimize}
+                      disabled={isOptimizing}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 py-3 rounded-xl font-bold border border-gray-700 transition-all flex items-center justify-center gap-2 text-sm"
+                    >
+                      {isOptimizing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-amber-500" />}
+                      Apply AI Suggestions
+                    </button>
+                    <button 
+                      onClick={handleTuneParameters}
+                      disabled={isTuning}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 py-3 rounded-xl font-bold border border-gray-700 transition-all flex items-center justify-center gap-2 text-sm"
+                    >
+                      {isTuning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4 text-indigo-400" />}
+                      Tune Parameters
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -277,11 +324,55 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                 </div>
               </div>
 
+              <div className="flex gap-2">
+                <button 
+                  onClick={applyOptimization}
+                  className="flex-1 bg-amber-500 hover:bg-amber-400 text-gray-950 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                >
+                  Apply AI Suggestions
+                </button>
+                <button 
+                  onClick={handleTuneParameters}
+                  disabled={isTuning}
+                  className="flex-1 bg-indigo-500 hover:bg-indigo-400 text-white py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                >
+                  {isTuning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4" />}
+                  Tune Parameters
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tuningResult && (
+            <div className="bg-gray-900 border border-indigo-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden animate-in slide-in-from-bottom-5 duration-500">
+              <div className="absolute top-0 right-0 p-3">
+                <div className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <Settings className="w-3 h-3" /> TUNED
+                </div>
+              </div>
+              <h3 className="text-base font-bold mb-3 text-indigo-400 flex items-center gap-2">
+                Suggested Parameters
+              </h3>
+              <p className="text-xs text-gray-400 mb-4 leading-relaxed font-mono">
+                {tuningResult.reasoning}
+              </p>
+              
+              <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 mb-4 grid grid-cols-2 gap-4">
+                <div>
+                   <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Indicator</div>
+                   <div className="text-sm text-white font-bold">{tuningResult.indicator}</div>
+                </div>
+                <div>
+                   <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Condition</div>
+                   <div className="text-sm text-white font-bold">{tuningResult.condition} {tuningResult.value}</div>
+                </div>
+              </div>
+
               <button 
-                onClick={applyOptimization}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-gray-950 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                onClick={applyTuning}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
               >
-                Apply AI Suggestions
+                Apply Tuned Parameters
               </button>
             </div>
           )}

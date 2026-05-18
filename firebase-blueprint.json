@@ -34,6 +34,22 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["sellerId", "title", "price", "status", "createdAt", "updatedAt"]
+    },
+    "TradeResult": {
+      "title": "Trade Result",
+      "description": "A record of an executed trade.",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "side": { "type": "string" },
+        "quantity": { "type": "number" },
+        "type": { "type": "string" },
+        "price": { "type": "number" },
+        "totalValue": { "type": "number" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["symbol", "side", "quantity", "type", "price", "status"]
     }
   },
   "firestore": {
@@ -44,6 +60,10 @@
     "dataMarketplace/{listingId}": {
       "schema": "DataListing",
       "description": "Listings of data or strategies being sold by users."
+    },
+    "trades/{tradeId}": {
+      "schema": "TradeResult",
+      "description": "Log of trades executed."
     }
   }
 }

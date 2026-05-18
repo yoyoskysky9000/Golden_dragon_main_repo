@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PredictionMarket, PredictionBot } from '../types';
-import { Sparkles, BrainCircuit, Activity, TrendingUp, TrendingDown, Target, Zap, Loader2, Play, Pause, Plus, CheckCircle, Settings } from 'lucide-react';
+import { Sparkles, BrainCircuit, Activity, TrendingUp, TrendingDown, Target, Zap, Loader2, Play, Pause, Plus, CheckCircle, Settings, Search } from 'lucide-react';
+import { getPredictionMarketSentiment } from '../services/geminiService';
 
 const mockMarkets: PredictionMarket[] = [
   { id: 'm1', question: 'Will the Fed cut rates in March 2026?', category: 'economics', probabilityYes: 42, volume: 1520000, endDate: '2026-03-20', resolutionSource: 'Federal Reserve', platforms: { polymarket: { yesPrice: 0.42, noPrice: 0.58, volume: 1520000 } } },
@@ -40,6 +41,34 @@ export default function OracleSpace() {
     probabilityYes: 50,
     volume: 0
   });
+
+  const [marketInsights, setMarketInsights] = useState<Record<string, string>>({});
+  const [isLoadingInsight, setIsLoadingInsight] = useState<string | null>(null);
+
+  const handleFetchInsight = async (market: PredictionMarket) => {
+    setIsLoadingInsight(market.id);
+    const syntheticStock: any = {
+      symbol: market.id,
+      name: market.question,
+      price: market.probabilityYes,
+      change: 0,
+      changePercent: 0,
+      volume: market.volume,
+      history: [],
+      sector: market.category,
+      assetType: 'option',
+      description: `Prediction market resolving via ${market.resolutionSource}`
+    };
+    
+    try {
+      const insight = await getPredictionMarketSentiment(syntheticStock);
+      setMarketInsights(prev => ({ ...prev, [market.id]: insight }));
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoadingInsight(null);
+    }
+  };
 
   const handleSaveApiKeys = () => {
     localStorage.setItem('exchange_creds_polymarket', JSON.stringify({ key: apiKeys.polymarketKey, secret: apiKeys.polymarketSecret }));
@@ -204,7 +233,7 @@ export default function OracleSpace() {
                 
                 <h3 className="text-lg font-bold text-white mb-4 relative z-10 leading-tight">{market.question}</h3>
                 
-                <div className="space-y-3 relative z-10">
+                <div className="space-y-3 relative z-10 mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-emerald-400 font-medium">Yes: {market.probabilityYes}%</span>
                     <span className="text-rose-400 font-medium">No: {100 - market.probabilityYes}%</span>
@@ -215,7 +244,24 @@ export default function OracleSpace() {
                   </div>
                 </div>
 
-                <div className="mt-6 flex gap-2 relative z-10">
+                {marketInsights[market.id] && (
+                  <div className="relative z-10 mb-4 p-3 bg-gray-950/50 rounded-lg border border-indigo-500/30">
+                    <h4 className="text-xs font-bold text-indigo-400 mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Oracle Insight</h4>
+                    <p className="text-xs text-gray-300 font-mono whitespace-pre-wrap">{marketInsights[market.id]}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 relative z-10 mb-2">
+                   <button
+                     onClick={() => handleFetchInsight(market)}
+                     disabled={isLoadingInsight === market.id}
+                     className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1"
+                   >
+                      {isLoadingInsight === market.id ? <><Loader2 className="w-3 h-3 animate-spin" /> Fetching...</> : <><Search className="w-3 h-3" /> Fetch AI Insight</>}
+                   </button>
+                </div>
+
+                <div className="mt-2 flex gap-2 relative z-10">
                   <select
                     value={deployExchanges[market.id] || 'Polymarket'}
                     onChange={(e) => setDeployExchanges({...deployExchanges, [market.id]: e.target.value})}

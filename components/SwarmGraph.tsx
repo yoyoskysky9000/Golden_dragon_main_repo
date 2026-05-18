@@ -25,7 +25,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   type: 'hierarchy' | 'dependency' | 'assignment';
 }
 
-export default function SwarmGraph({ agents, tasks, dataSources }: SwarmGraphProps) {
+export default function SwarmGraph({ agents, tasks, dataSources, onNodeClick }: SwarmGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -159,7 +159,7 @@ export default function SwarmGraph({ agents, tasks, dataSources }: SwarmGraphPro
       .force("link", d3.forceLink<GraphNode, GraphLink>(links).id(d => d.id).distance(d => d.type === 'hierarchy' ? 120 : 80))
       .force("charge", d3.forceManyBody().strength(-400))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide().radius(d => d.radius + 15).iterations(2));
+      .force("collide", d3.forceCollide<GraphNode>().radius(d => d.radius + 15).iterations(2));
 
     const link = g.append("g")
       .attr("class", "links")

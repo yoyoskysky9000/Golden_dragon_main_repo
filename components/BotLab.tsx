@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Bot, Plus, Play, Pause, Trash2, Copy, Cpu, Zap, Activity, BrainCircuit, Sparkles, Loader2, Save, Database, Settings, GripVertical, X, CheckCircle2, AlertTriangle, Layers, History, ChevronDown, Wand2, TrendingUp, ArrowRight, Globe, Clock, Target } from 'lucide-react';
+import { Bot, Plus, Play, Pause, Trash2, Copy, Cpu, Zap, Activity, BrainCircuit, Sparkles, Loader2, Save, Database, Settings, GripVertical, X, CheckCircle2, AlertTriangle, Layers, History, ChevronDown, Wand2, TrendingUp, ArrowRight, Globe, Clock, Target, Lock } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid, Tooltip } from 'recharts';
 import { StockData, TradingBot, DataSource } from '../types';
 import { generateBotStrategy, optimizeStrategy, createAIBot, spawnHedgeFundBots } from '../services/geminiService';
@@ -246,62 +246,39 @@ const BotLab: React.FC<BotLabProps> = ({
 
   const [isOptimizing, setIsOptimizing] = useState<string | null>(null);
 
+  const [authAction, setAuthAction] = useState<{ botId: string, action: 'autoMode' | 'autoOptimize', currentValue: boolean } | null>(null);
+  const [twoFaCode, setTwoFaCode] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  const handleToggleAuto = (bot: TradingBot, action: 'autoMode' | 'autoOptimize') => {
+      const currentValue = bot[action] || false;
+      if (!currentValue) {
+          setAuthAction({ botId: bot.id, action, currentValue });
+          setTwoFaCode('');
+      } else {
+          onUpdateBot?.({ ...bot, [action]: false });
+      }
+  };
+
+  const submitTwoFa = () => {
+      if (twoFaCode.length >= 4 && authAction) {
+          setIsAuthenticating(true);
+          setTimeout(() => {
+              setIsAuthenticating(false);
+              const bot = bots.find(b => b.id === authAction.botId);
+              if (bot) {
+                  onUpdateBot?.({ ...bot, [authAction.action]: true });
+                  addNotification?.('Security Verified', `${authAction.action === 'autoMode' ? 'Auto-Trading' : 'Auto-Optimize'} enabled.`, 'success');
+              }
+              setAuthAction(null);
+              setTwoFaCode('');
+          }, 800);
+      }
+  };
+
   const handleRunBacktest = async (botId: string) => {
     setBacktestingBotId(botId);
-    
-    // Simulate backtesting delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const bot = bots.find(b => b.id === botId);
-    if (bot) {
-        // Generate mock test data
-        const dataPoints = 20;
-        let currentPnl = bot.pnl;
-        let history = [];
-        
-        // Base volatility on bot risk or type
-        const volatility = bot.type === 'ai_adaptive' ? 50 : 20;
-        
-        let currentTrades = bot.trades;
-        for (let i = 0; i < dataPoints; i++) {
-            const date = new Date();
-            date.setHours(date.getHours() - (dataPoints - i) * 4); // roughly past week
-            
-            // Random walk with drift
-            const change = (Math.random() - 0.45) * volatility;
-            currentPnl += change;
-            currentTrades += Math.floor(Math.random() * 2);
-            
-            history.push({
-                timestamp: date.getTime(),
-                pnl: currentPnl,
-                trades: currentTrades
-            });
-        }
-        
-        const totalReturn = (Math.random() * 15 + 5); // 5% to 20%
-        const winRate = (Math.random() * 40 + 40); // 40% to 80%
-        const maxDrawdown = (Math.random() * 10 + 2); // 2% to 12%
-
-        onUpdateBot({
-            ...bot,
-            pnl: currentPnl,
-            trades: currentTrades,
-            performanceHistory: history,
-            backtestMetrics: {
-                totalReturn,
-                winRate,
-                maxDrawdown,
-                totalTrades: Math.floor(Math.random() * 50) + 10,
-                sharpeRatio: (Math.random() * 2) + 0.5,
-                sortinoRatio: (Math.random() * 2) + 0.5,
-                maxConsecutiveWins: Math.floor(Math.random() * 5) + 3,
-                maxConsecutiveLosses: Math.floor(Math.random() * 4) + 1
-            }
-        });
-    }
-    
-    setBacktestingBotId(null);
+    setView('backtest');
   };
 
   const manualStrategyTemplates = [
@@ -522,7 +499,8 @@ const BotLab: React.FC<BotLabProps> = ({
              bots={bots} 
              dataSources={dataSources} 
              stocks={stocks} 
-             onClose={() => setView('list')} 
+             onClose={() => { setView('list'); setBacktestingBotId(null); }} 
+             initialBotId={backtestingBotId}
           />
       );
   }
@@ -1115,6 +1093,12 @@ const BotLab: React.FC<BotLabProps> = ({
               )}
             </div>
             <button 
+              onClick={() => setView('backtest')}
+              className="bg-transparent border border-amber-500/50 hover:bg-amber-500/20 text-amber-500 hover:text-white hover:shadow-[0_0_15px_rgba(245,158,11,0.5)] px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-lg"
+            >
+              <History className="w-4 h-4" /> Run Backtest
+            </button>
+            <button 
               onClick={handleSpawnFund}
               disabled={isSpawningFund}
               className="bg-transparent border border-[var(--neon-purple)] hover:bg-[var(--neon-purple)]/20 text-[var(--neon-purple)] hover:text-white hover:shadow-[0_0_15px_var(--neon-purple)] px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-50 shadow-lg"
@@ -1126,7 +1110,7 @@ const BotLab: React.FC<BotLabProps> = ({
               onClick={() => setView('create')}
               className="bg-transparent border border-[var(--neon-pink)] hover:bg-[var(--neon-pink)]/20 text-[var(--neon-pink)] hover:text-white hover:shadow-[0_0_15px_var(--neon-pink)] px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-lg"
             >
-              <Plus className="w-4 h-4" /> Arcane Forge
+              <Plus className="w-4 h-4" /> Create New Bot
             </button>
           </div>
       </div>
@@ -1154,7 +1138,7 @@ const BotLab: React.FC<BotLabProps> = ({
               <h3 className="text-xl font-bold text-gray-300">No Active Entities</h3>
               <p className="text-gray-500 max-w-sm mb-6">Your grid is empty. Use the AI Adaptive Strategy builder to summon your first automated construct, or instantly deploy a Cyber Swarm.</p>
               <div className="flex gap-4">
-                  <button onClick={() => setView('create')} className="text-[var(--neon-pink)] hover:text-white font-medium hover:text-shadow-[0_0_10px_var(--neon-pink)] transition-all">Open Arcane Forge</button>
+                  <button onClick={() => setView('create')} className="text-[var(--neon-pink)] hover:text-white font-medium hover:text-shadow-[0_0_10px_var(--neon-pink)] transition-all">Create New Bot</button>
                   <button onClick={handleSpawnFund} disabled={isSpawningFund} className="text-[var(--neon-cyan)] hover:text-white font-medium hover:text-shadow-[0_0_10px_var(--neon-cyan)] transition-all">Summon Cyber Swarm</button>
               </div>
           </div>
@@ -1213,7 +1197,7 @@ const BotLab: React.FC<BotLabProps> = ({
                             <div className="flex flex-col items-end gap-1">
                                 <div className="flex gap-2">
                                     <button 
-                                        onClick={() => onUpdateBot?.({...bot, autoMode: !bot.autoMode})}
+                                        onClick={() => handleToggleAuto(bot, 'autoMode')}
                                         className={`flex items-center gap-1.5 px-2 py-1 rounded-md border transition-colors ${
                                             bot.autoMode 
                                                 ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' 
@@ -1228,7 +1212,7 @@ const BotLab: React.FC<BotLabProps> = ({
                                         </div>
                                     </button>
                                     <button 
-                                        onClick={() => onUpdateBot?.({...bot, autoOptimize: !bot.autoOptimize})}
+                                        onClick={() => handleToggleAuto(bot, 'autoOptimize')}
                                         className={`flex items-center gap-1.5 px-2 py-1 rounded-md border transition-colors ${
                                             bot.autoOptimize 
                                                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
@@ -1595,7 +1579,7 @@ const BotLab: React.FC<BotLabProps> = ({
                             {bot.isLive ? 'GO PAPER' : 'GO LIVE'}
                           </button>
                           <button 
-                            onClick={() => onUpdateBot?.({...bot, autoOptimize: !bot.autoOptimize})}
+                            onClick={() => handleToggleAuto(bot, 'autoOptimize')}
                             className={`p-2 rounded-lg transition-colors border ${bot.autoOptimize ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30' : 'text-gray-600 border-transparent hover:text-white hover:bg-gray-800'}`}
                             title={bot.autoOptimize ? "Auto-Optimize Enabled" : "Enable Auto-Optimize"}
                           >
@@ -1889,6 +1873,65 @@ const BotLab: React.FC<BotLabProps> = ({
                             className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
                           >
                               Acknowledge
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 2FA Modal */}
+      {authAction && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-gray-950 border border-indigo-500/30 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500"></div>
+                  <div className="p-6">
+                      <div className="flex justify-between items-start mb-6">
+                          <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex flex-col items-center justify-center border border-indigo-500/30">
+                                  <Lock className="w-5 h-5" />
+                              </div>
+                              <div>
+                                  <h2 className="text-xl font-bold text-white">Security Check</h2>
+                                  <p className="text-sm text-gray-500">2FA required to enable automation</p>
+                              </div>
+                          </div>
+                          <button onClick={() => setAuthAction(null)} className="text-gray-500 hover:text-white transition-colors">
+                              <X className="w-6 h-6" />
+                          </button>
+                      </div>
+
+                      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
+                          <p className="text-sm text-gray-400 mb-4">
+                              You are about to enable <strong>{authAction.action === 'autoMode' ? 'Auto-Trading' : 'Auto-Optimize'}</strong>.
+                              This allows the AI to make trading decisions automatically without manual confirmation.
+                          </p>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                              Enter 2FA Code
+                          </label>
+                          <input 
+                              type="text" 
+                              autoFocus
+                              placeholder="000 000"
+                              value={twoFaCode}
+                              onChange={(e) => setTwoFaCode(e.target.value.replace(/[^0-9]/g, '').substring(0, 6))}
+                              className="w-full bg-gray-950 border border-gray-700 text-white rounded-lg p-3 outline-none focus:border-indigo-500 font-mono tracking-[0.5em] text-center text-lg"
+                          />
+                      </div>
+
+                      <div className="flex gap-4">
+                          <button
+                              onClick={() => setAuthAction(null)}
+                              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                          >
+                              Cancel
+                          </button>
+                          <button
+                              disabled={twoFaCode.length < 4 || isAuthenticating}
+                              onClick={submitTwoFa}
+                              className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition-all flex justify-center items-center gap-2"
+                          >
+                              {isAuthenticating ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Verify'}
                           </button>
                       </div>
                   </div>

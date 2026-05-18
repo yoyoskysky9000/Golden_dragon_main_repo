@@ -8,10 +8,11 @@ interface BacktestModuleProps {
   dataSources: DataSource[];
   stocks: StockData[];
   onClose: () => void;
+  initialBotId?: string | null;
 }
 
-export const BacktestModule: React.FC<BacktestModuleProps> = ({ bots, dataSources, stocks, onClose }) => {
-  const [selectedBotId, setSelectedBotId] = useState<string>('');
+export const BacktestModule: React.FC<BacktestModuleProps> = ({ bots, dataSources, stocks, onClose, initialBotId }) => {
+  const [selectedBotId, setSelectedBotId] = useState<string>(initialBotId || '');
   const [timeframe, setTimeframe] = useState<string>('1M'); // '1W', '1M', '3M', '6M', '1Y'
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [isSimulating, setIsSimulating] = useState(false);
