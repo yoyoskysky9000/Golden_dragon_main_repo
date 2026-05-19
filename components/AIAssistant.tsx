@@ -9,7 +9,7 @@ interface AIAssistantProps {
   selectedStock: StockData;
   initialMessage?: string;
   onMessageConsumed?: () => void;
-  onExecuteTrade?: (order: { symbol: string, side: 'buy' | 'sell', quantity: number, type: 'market' | 'limit' | 'stop-loss', price?: number }) => void;
+  onExecuteTrade?: (order: { symbol: string, side: 'buy' | 'sell', quantity: number, type: 'market' | 'limit' | 'stop-loss' | 'take-profit' | 'bracket', price?: number, stopLossPrice?: number, takeProfitPrice?: number }) => void;
   allStocks?: StockData[];
 }
 
@@ -25,6 +25,16 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [isAutoPilot, setIsAutoPilot] = useState(false);
+
+  // Trade Execution State
+  const [showTradeForm, setShowTradeForm] = useState(false);
+  const [tradeSide, setTradeSide] = useState<'buy' | 'sell'>('buy');
+  const [tradeQuantity, setTradeQuantity] = useState('1');
+  const [tradeType, setTradeType] = useState<'market' | 'limit' | 'stop-loss' | 'bracket'>('market');
+  const [tradePrice, setTradePrice] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [stopLossPrice, setStopLossPrice] = useState('');
+  const [takeProfitPrice, setTakeProfitPrice] = useState('');
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isChatting]);
 
@@ -88,7 +98,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
     return () => clearInterval(interval);
   }, [isAutoPilot, isChatting, selectedStock, messages, onExecuteTrade]);
 
-  const handleAnalyze = async (type: 'quick' | 'deep' | 'hindsight' | 'arbitrage' | 'signal' | 'prediction') => {
+  const handleAnalyze = async (type: 'quick' | 'deep' | 'hindsight' | 'arbitrage' | 'signal' | 'prediction' | 'general') => {
     setIsLoadingAnalysis(true);
     if (type !== 'quick') setIsDeepScanning(true);
     setAnalysis('');
@@ -267,7 +277,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
                     <Activity className="w-3 h-3" /> Real-Time Signal
                 </button>
                 <button onClick={() => handleAnalyze('prediction')} disabled={isLoadingAnalysis} className="col-span-1 text-[10px] bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg flex justify-center items-center gap-1 font-bold shadow-lg shadow-blue-950/40 transition-all">
-                    <Vote className="w-3 h-3" /> Pred Market Sentinel
+                    <Vote className="w-3 h-3" /> Prediction Market Sentiment
+                </button>
+            </div>
+            <div className="mt-2 text-center w-full">
+                <button onClick={() => handleAnalyze('general')} disabled={isLoadingAnalysis} className="w-full text-[10px] bg-sky-600 hover:bg-sky-500 text-white p-2 rounded-lg flex justify-center items-center gap-1 font-bold shadow-lg shadow-sky-950/40 transition-all">
+                    <Globe className="w-3 h-3" /> General Market Analysis
                 </button>
             </div>
           </div>
@@ -284,6 +299,101 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
               <p className="italic text-gray-600 text-center text-[10px] py-4">Awaiting tactical command for {selectedStock.symbol}...</p>
             )}
           </div>
+        </div>
+
+        {/* Trade Execution Component */}
+        <div className="rounded-xl p-4 border bg-gray-800/40 border-gray-800 transition-all">
+          <div className="flex items-center justify-between font-bold mb-3 cursor-pointer" onClick={() => setShowTradeForm(!showTradeForm)}>
+            <h3 className="text-[9px] text-emerald-500 uppercase tracking-widest flex items-center gap-2">
+              <Zap className="w-3 h-3" /> Trade Execution
+            </h3>
+            <span className="text-gray-500 text-xs">{showTradeForm ? '▼' : '▶'}</span>
+          </div>
+          
+          {showTradeForm && (
+            <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setTradeSide('buy')} 
+                  className={`flex-1 text-xs font-bold py-1.5 rounded border transition-colors ${tradeSide === 'buy' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-gray-900 border-gray-700 text-gray-500'}`}
+                >BUY</button>
+                <button 
+                  onClick={() => setTradeSide('sell')} 
+                  className={`flex-1 text-xs font-bold py-1.5 rounded border transition-colors ${tradeSide === 'sell' ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-gray-900 border-gray-700 text-gray-500'}`}
+                >SELL</button>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] uppercase text-gray-500 block mb-1">Type</label>
+                  <select 
+                    value={tradeType}
+                    onChange={(e) => {
+                      const newType = e.target.value as any;
+                      setTradeType(newType);
+                      if (newType === 'bracket') setShowAdvanced(true);
+                    }}
+                    className="w-full bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white"
+                  >
+                    <option value="market">Market</option>
+                    <option value="limit">Limit</option>
+                    <option value="stop-loss">Stop Loss</option>
+                    <option value="bracket">Bracket (TPSL)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] uppercase text-gray-500 block mb-1">Qty</label>
+                  <input type="number" min="1" value={tradeQuantity} onChange={(e) => setTradeQuantity(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white inline-block" />
+                </div>
+              </div>
+
+              {['limit', 'stop-loss', 'bracket'].includes(tradeType) && (
+                <div>
+                  <label className="text-[9px] uppercase text-gray-500 block mb-1">Price</label>
+                  <input type="number" step="0.01" value={tradePrice} onChange={(e) => setTradePrice(e.target.value)} placeholder={selectedStock.price.toString()} className="w-full bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white" />
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-gray-800">
+                <label className="flex items-center gap-2 cursor-pointer mb-2">
+                  <input type="checkbox" checked={showAdvanced || tradeType === 'bracket'} onChange={(e) => setShowAdvanced(e.target.checked)} className="rounded border-gray-600 bg-gray-900" disabled={tradeType === 'bracket'} />
+                  <span className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Advanced Features (TPSL)</span>
+                </label>
+
+                {(showAdvanced || tradeType === 'bracket') && (
+                  <div className="grid grid-cols-2 gap-2 mt-2 animate-in fade-in">
+                    <div>
+                      <label className="text-[9px] uppercase text-gray-500 block mb-1">Take Profit</label>
+                      <input type="number" step="0.01" value={takeProfitPrice} onChange={(e) => setTakeProfitPrice(e.target.value)} placeholder="0.00" className="w-full bg-gray-900 border border-emerald-500/30 rounded p-1.5 text-xs text-emerald-400 focus:border-emerald-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] uppercase text-gray-500 block mb-1">Stop Loss</label>
+                      <input type="number" step="0.01" value={stopLossPrice} onChange={(e) => setStopLossPrice(e.target.value)} placeholder="0.00" className="w-full bg-gray-900 border border-rose-500/30 rounded p-1.5 text-xs text-rose-400 focus:border-rose-500 outline-none" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button 
+                onClick={() => {
+                  if (onExecuteTrade) {
+                    onExecuteTrade({
+                      symbol: selectedStock.symbol,
+                      side: tradeSide,
+                      quantity: Number(tradeQuantity) || 1,
+                      type: tradeType as any,
+                      price: tradePrice ? Number(tradePrice) : undefined,
+                      stopLossPrice: stopLossPrice ? Number(stopLossPrice) : undefined,
+                      takeProfitPrice: takeProfitPrice ? Number(takeProfitPrice) : undefined
+                    });
+                  }
+                }}
+                className={`w-full text-xs font-bold py-2 rounded-lg transition-all ${tradeSide === 'buy' ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow shadow-emerald-500/20' : 'bg-rose-600 hover:bg-rose-500 text-white shadow shadow-rose-500/20'}`}
+              >
+                Execute {tradeSide.toUpperCase()} {selectedStock.symbol}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col space-y-3">

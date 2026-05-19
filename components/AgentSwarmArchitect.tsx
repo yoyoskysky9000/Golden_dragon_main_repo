@@ -4,7 +4,7 @@ import {
   Trash2, Play, GitMerge, FileText, CheckCircle2, ChevronRight, Activity, 
   Settings, Loader2, Pause, RotateCcw
 } from 'lucide-react';
-import { AIAgent, DataSource, AgentTask } from '../types';
+import { AIAgent, DataSource, AgentTask, StockData } from '../types';
 import { simulateAgentTraining } from '../services/geminiService';
 import SwarmGraph from './SwarmGraph';
 import AgentChat from './AgentChat';
@@ -15,9 +15,10 @@ interface Props {
   dataSources: DataSource[];
   tasks?: AgentTask[];
   setTasks?: React.Dispatch<React.SetStateAction<AgentTask[]>>;
+  stocks?: StockData[];
 }
 
-export default function AgentSwarmArchitect({ agents, setAgents, dataSources, tasks = [], setTasks }: Props) {
+export default function AgentSwarmArchitect({ agents, setAgents, dataSources, tasks = [], setTasks, stocks }: Props) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [isSwarmModeActive, setIsSwarmModeActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);

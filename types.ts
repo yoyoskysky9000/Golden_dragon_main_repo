@@ -290,7 +290,8 @@ export enum AppView {
   MARKETPLACE = 'MARKETPLACE',
   PREDICTION_MARKETS = 'PREDICTION_MARKETS',
   SWARM = 'SWARM',
-  TASKS = 'TASKS'
+  TASKS = 'TASKS',
+  TELEGRAM_BOT = 'TELEGRAM_BOT'
 }
 
 export interface AgentTask {

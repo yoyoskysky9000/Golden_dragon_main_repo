@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Database, Plus, GripVertical, Settings, Trash2, Link, Network, List } from 'lucide-react';
+import { Database, Plus, GripVertical, Settings, Trash2, Link, Network, List, Activity } from 'lucide-react';
 import { DataSource } from '../types';
 import DataSourceGraph from './DataSourceGraph';
+import { LiveWebsocketManager } from './LiveWebsocketManager';
 
 interface DataSourcesManagerProps {
   dataSources: DataSource[];
@@ -9,6 +10,7 @@ interface DataSourcesManagerProps {
   onUpdateDataSource: (source: DataSource) => void;
   onDeleteDataSource: (id: string) => void;
   onReorderDataSources: (sources: DataSource[]) => void;
+  onLiveTick?: (updates: Record<string, number>) => void;
 }
 
 const DataSourcesManager: React.FC<DataSourcesManagerProps> = ({
@@ -16,11 +18,12 @@ const DataSourcesManager: React.FC<DataSourcesManagerProps> = ({
   onAddDataSource,
   onUpdateDataSource,
   onDeleteDataSource,
-  onReorderDataSources
+  onReorderDataSources,
+  onLiveTick
 }) => {
   const [editingSource, setEditingSource] = useState<Partial<DataSource> | null>(null);
   const [isAddingSource, setIsAddingSource] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'graph' | 'live'>('list');
   const [draggedSourceId, setDraggedSourceId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const hasAddedDefaultRef = React.useRef(false);
@@ -114,6 +117,13 @@ const DataSourcesManager: React.FC<DataSourcesManagerProps> = ({
             >
               <Network className="w-4 h-4" />
             </button>
+            <button 
+              onClick={() => setViewMode('live')}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'live' ? 'bg-emerald-600/20 text-emerald-400' : 'text-gray-500 hover:text-gray-300'}`}
+              title="Test Live WebSocket Feed"
+            >
+              <Activity className="w-4 h-4" />
+            </button>
           </div>
           <button 
             onClick={() => { setIsAddingSource(true); setEditingSource({ name: '', type: 'external_api', priority: 50 }); }}
@@ -133,6 +143,10 @@ const DataSourcesManager: React.FC<DataSourcesManagerProps> = ({
       {viewMode === 'graph' ? (
         <div className="flex-1 w-full relative">
             <DataSourceGraph dataSources={sortedDataSources} />
+        </div>
+      ) : viewMode === 'live' ? (
+        <div className="flex-1 w-full p-4 overflow-y-auto">
+            <LiveWebsocketManager onUpdatePrices={onLiveTick || (() => {})} />
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -254,6 +268,21 @@ const DataSourcesManager: React.FC<DataSourcesManagerProps> = ({
                   <option value="live_feed">Live Data Feed</option>
                 </select>
               </div>
+
+              {editingSource.type === 'realtime' && (
+                <div>
+                  <label className="block text-xs text-gray-500 uppercase font-bold mb-1">WebSocket URL</label>
+                  <input
+                    type="text"
+                    value={editingSource.config?.wsUrl || ''}
+                    onChange={e => setEditingSource({...editingSource, config: { ...editingSource.config, wsUrl: e.target.value }})}
+                    className="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none font-mono text-sm"
+                    placeholder="wss://stream.binance.com:9443/ws/!ticker@arr"
+                  />
+                  <p className="text-[9px] text-gray-600 mt-1">Connect directly via WebSocket instead of HTTP polling.</p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs text-gray-500 uppercase font-bold mb-1">Priority (1-100)</label>
                 <input 

@@ -404,6 +404,93 @@ async function startServer() {
 
   const wss = new WebSocketServer({ noServer: true });
 
+  const serverOrders: any[] = [];
+
+  wss.on('connection', (ws) => {
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === 'PLACE_ORDER') {
+           const order = message.order;
+           const newOrder = {
+             id: `ord-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+             ...order,
+             status: 'open',
+             timestamp: Date.now()
+           };
+           serverOrders.push({ ws, order: newOrder });
+           
+           if (newOrder.type === 'market' && !newOrder.isPreMarket) {
+              newOrder.status = 'FILLED';
+              // Execute market order immediately
+              ws.send(JSON.stringify({ type: 'ORDER_UPDATE', order: newOrder }));
+           } else {
+              ws.send(JSON.stringify({ type: 'ORDER_UPDATE', order: newOrder }));
+           }
+
+           // Check for bracket orders
+           if (order.stopLossPrice || order.takeProfitPrice) {
+               if (order.takeProfitPrice) {
+                   const tpOrder = {
+                       id: `ord-${Date.now()}-tp-${Math.floor(Math.random()*1000)}`,
+                       symbol: order.symbol,
+                       side: order.side === 'buy' ? 'sell' : 'buy',
+                       type: 'take-profit',
+                       shares: order.shares,
+                       price: order.takeProfitPrice,
+                       timestamp: Date.now(),
+                       status: 'open'
+                   };
+                   serverOrders.push({ ws, order: tpOrder });
+                   ws.send(JSON.stringify({ type: 'ORDER_UPDATE', order: tpOrder }));
+               }
+               if (order.stopLossPrice) {
+                   const slOrder = {
+                       id: `ord-${Date.now()}-sl-${Math.floor(Math.random()*1000)}`,
+                       symbol: order.symbol,
+                       side: order.side === 'buy' ? 'sell' : 'buy',
+                       type: 'stop-loss',
+                       shares: order.shares,
+                       price: order.stopLossPrice,
+                       timestamp: Date.now(),
+                       status: 'open'
+                   };
+                   serverOrders.push({ ws, order: slOrder });
+                   ws.send(JSON.stringify({ type: 'ORDER_UPDATE', order: slOrder }));
+               }
+           }
+        }
+      } catch (err) {}
+    });
+  });
+
+  // Loop to trace limit/stop orders
+  setInterval(() => {
+     serverOrders.forEach(obj => {
+         const { ws, order } = obj;
+         if (order.status === 'open') {
+             const price = currentPrices[order.symbol] || currentPrices[SYMBOL_MAP[order.symbol]];
+             if (price) {
+                 let shouldExecute = false;
+                 if (order.type === 'limit' && order.side === 'buy' && price <= order.price) shouldExecute = true;
+                 if (order.type === 'limit' && order.side === 'sell' && price >= order.price) shouldExecute = true;
+                 if (order.type === 'stop-loss' && order.side === 'sell' && price <= order.price) shouldExecute = true;
+                 if (order.type === 'stop-loss' && order.side === 'buy' && price >= order.price) shouldExecute = true;
+                 if (order.type === 'take-profit' && order.side === 'sell' && price >= order.price) shouldExecute = true;
+                 if (order.type === 'take-profit' && order.side === 'buy' && price <= order.price) shouldExecute = true;
+                 
+                 if (shouldExecute) {
+                     order.status = 'FILLED';
+                     order.executionPrice = price;
+                     if (ws.readyState === 1) { // 1 = OPEN
+                         ws.send(JSON.stringify({ type: 'ORDER_UPDATE', order }));
+                     }
+                 }
+             }
+         }
+     });
+  }, 1000);
+
   server.on('upgrade', (request, socket, head) => {
     if (request.url?.startsWith('/ws')) {
       wss.handleUpgrade(request, socket, head, (ws) => {
@@ -436,45 +523,61 @@ async function startServer() {
   const kraken = new ccxt.kraken();
   const coinbase = new ccxt.coinbase();
 
-  const fetchRealPrices = async () => {
+  // Setup Native WebSocket for Binance
+  const startBinanceWS = () => {
+    try {
+      const WebSocketClient = require('ws');
+      const ws = new WebSocketClient('wss://stream.binance.com:9443/ws/!ticker@arr');
+      
+      ws.on('open', () => console.log('Binance WS connected'));
+      
+      ws.on('message', (data: any) => {
+        try {
+          const parsed = JSON.parse(data);
+          let updates: any[] = [];
+          if (Array.isArray(parsed)) {
+            parsed.forEach((ticker: any) => {
+              const mappedSym = ticker.s === 'BTCUSDT' ? 'BTC-USD' : 
+                                ticker.s === 'ETHUSDT' ? 'ETH-USD' : 
+                                ticker.s === 'SOLUSDT' ? 'SOL-USD' : null;
+              if (mappedSym) {
+                const price = parseFloat(ticker.c);
+                currentPrices[mappedSym] = price;
+                updates.push({
+                   symbol: mappedSym,
+                   price: price,
+                   exchanges: { 'Binance': price }
+                });
+              }
+            });
+          }
+          if (updates.length > 0) {
+            const message = JSON.stringify({ type: 'TICK', data: updates });
+            wss.clients.forEach(client => {
+              if (client.readyState === 1) client.send(message);
+            });
+          }
+        } catch(e) {}
+      });
+
+      ws.on('error', () => {
+        setTimeout(startBinanceWS, 5000);
+      });
+      
+      ws.on('close', () => {
+        setTimeout(startBinanceWS, 5000);
+      });
+    } catch (e) {
+      console.error('Binance WS init failed', e);
+    }
+  };
+
+  startBinanceWS();
+
+  // Keep stocks on a slower poll since Yahoo Finance doesn't have a simple public ws
+  const fetchStockPrices = async () => {
     try {
       const updates = [];
-
-      // Fetch Crypto Prices
-      for (const crypto of CRYPTOS) {
-        const symbol = SYMBOL_MAP[crypto];
-        const newExchanges: Record<string, number> = {};
-        
-        let avgPrice = 0;
-        let count = 0;
-
-        try {
-          const tBinance = await binanceus.fetchTicker(crypto.replace('USD', 'USDT')).catch(() => null);
-          if (tBinance?.last) { newExchanges['BinanceUS'] = tBinance.last; avgPrice += tBinance.last; count++; }
-        } catch (e) {}
-
-        try {
-          const tKraken = await kraken.fetchTicker(crypto).catch(() => null);
-          if (tKraken?.last) { newExchanges['Kraken'] = tKraken.last; avgPrice += tKraken.last; count++; }
-        } catch (e) {}
-
-        try {
-          const tCoinbase = await coinbase.fetchTicker(crypto).catch(() => null);
-          if (tCoinbase?.last) { newExchanges['Coinbase'] = tCoinbase.last; avgPrice += tCoinbase.last; count++; }
-        } catch (e) {}
-
-        if (count > 0) {
-          const newPrice = avgPrice / count;
-          currentPrices[symbol] = newPrice;
-          updates.push({
-            symbol,
-            price: newPrice,
-            exchanges: newExchanges
-          });
-        }
-      }
-
-      // Fetch Stock Prices
       for (const stock of STOCKS) {
         try {
           const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${stock}`);
@@ -492,23 +595,17 @@ async function startServer() {
           }
         } catch (e) {}
       }
-
       if (updates.length > 0) {
         const message = JSON.stringify({ type: 'TICK', data: updates });
         wss.clients.forEach(client => {
-          if (client.readyState === 1) { // WebSocket.OPEN
-             client.send(message);
-          }
+          if (client.readyState === 1) client.send(message);
         });
       }
-    } catch (err) {
-      console.error('Error fetching real prices', err);
-    }
+    } catch (e) {}
   };
 
-  // Start polling
-  setInterval(fetchRealPrices, 5000);
-  fetchRealPrices(); // Initial fetch
+  setInterval(fetchStockPrices, 10000);
+  fetchStockPrices();
 
 }
 

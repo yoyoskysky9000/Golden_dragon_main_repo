@@ -14,7 +14,7 @@ interface CommandCenterProps {
   portfolio: PortfolioPosition[];
   cashBalance: number;
   realizedPL: number;
-  onExecuteTrade: (order: { symbol: string, side: 'buy' | 'sell', quantity: number, type: 'market' | 'limit' | 'stop-loss', price?: number }) => void;
+  onExecuteTrade: (order: { symbol: string, side: 'buy' | 'sell', quantity: number, type: 'market' | 'limit' | 'stop-loss' | 'take-profit' | 'bracket', price?: number, stopLossPrice?: number, takeProfitPrice?: number }) => void;
   onOpenDetails: (symbol: string) => void;
 }
 
@@ -191,6 +191,14 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
                         <span className="text-lg text-gray-300">{selectedStock?.name || 'Markets'}</span>
                     </h1>
                  </div>
+                 {selectedStock && (
+                     <button
+                         onClick={() => onExecuteTrade({ symbol: selectedStock.symbol, side: 'buy', quantity: 1, type: 'market', price: selectedStock.price })}
+                         className="bg-emerald-600 border border-emerald-500/50 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm shadow-emerald-900/20 hover:bg-emerald-500 transition-all flex items-center gap-2"
+                     >
+                         <Zap className="w-4 h-4" /> Buy {selectedStock.symbol} (MKT)
+                     </button>
+                 )}
               </div>
 
               <div className="flex items-center gap-4">

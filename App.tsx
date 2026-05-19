@@ -24,6 +24,7 @@ import PredictionMarketsLab from './components/PredictionMarketsLab';
 import CommandCenterDashboard from './components/CommandCenterDashboard';
 import AgentSwarmArchitect from './components/AgentSwarmArchitect';
 import AgentTasks from './components/AgentTasks';
+import TelegramConnect from './components/TelegramConnect';
 import { generateTradingSignal, logSignalToBackend, optimizeStrategy } from './services/geminiService';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -68,7 +69,8 @@ import {
   MessageSquare,
   Store,
   Vote,
-  ListTodo
+  ListTodo,
+  Send
 } from 'lucide-react';
 
 import { SignalLog } from './types';
@@ -376,8 +378,17 @@ function App() {
         pnl: 1045.50,
         pnlPercent: 28.5,
         trades: 312,
-        strategy: { indicator: 'News Sentiment', condition: 'GT', value: 'Spike', action: 'buy', additionalRules: [{ indicator: 'Social Media Feed', condition: 'LT', value: 'Drop', action: 'sell' }] },
-        aiDescription: 'Monitors news sentiment related to tech stocks. Buys on positive sentiment spikes and sells on negative sentiment drops, with aggressive risk parameters.',
+        strategy: { 
+          indicator: 'News Sentiment', 
+          condition: 'GT', 
+          value: 'Spike', 
+          action: 'buy', 
+          additionalRules: [
+            { indicator: 'Social Media Feed', condition: 'LT', value: 'Drop', action: 'sell' },
+            { indicator: 'MACD Crossover', condition: 'GT', value: '0', action: 'buy' }
+          ] 
+        },
+        aiDescription: 'Monitors news sentiment related to tech stocks. Buys on positive sentiment spikes and sells on negative sentiment drops, with aggressive risk parameters. Uses MACD Crossover confirmation.',
         isLive: true,
         autoMode: true,
         dataSources: [{ id: '3', priority: 100 }, { id: '4', priority: 100 }],
@@ -506,6 +517,7 @@ function App() {
   const cashBalanceRef = useRef(cashBalance);
   const portfolioRef = useRef(portfolio);
   const isSimConnectedRef = useRef(isSimConnected);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     botsRef.current = bots;
@@ -571,6 +583,7 @@ function App() {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
       ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
       ws.onopen = () => {
         if (!isConnected && currentBackoff > 1000) {
@@ -585,6 +598,54 @@ function App() {
           const message = JSON.parse(event.data);
           if (message.type === 'TICK' && message.data) {
             setStocks(currentStocks => simulateTick(currentStocks, message.data));
+          } else if (message.type === 'ORDER_UPDATE' && message.order) {
+            const updatedOrder = message.order;
+            
+            setActiveOrders(prev => {
+                const existing = prev.find(o => o.id === updatedOrder.id);
+                if (existing) {
+                    return prev.map(o => o.id === updatedOrder.id ? updatedOrder : o);
+                }
+                return [...prev, updatedOrder];
+            });
+
+            if (updatedOrder.status === 'FILLED') {
+              const totalCost = updatedOrder.shares * updatedOrder.executionPrice;
+              if (updatedOrder.side === 'buy') {
+                  // Assuming cash was reserved, but wait, market orders don't reserve cash beforehand in our updated logic.
+                  setCashBalance(prev => prev - totalCost);
+                  setPortfolio(prev => {
+                      const existing = prev.find(p => p.symbol === updatedOrder.symbol);
+                      if (existing) {
+                          return prev.map(p => p.symbol === updatedOrder.symbol ? {
+                              ...p,
+                              shares: p.shares + updatedOrder.shares,
+                              avgCost: ((p.shares * p.avgCost) + totalCost) / (p.shares + updatedOrder.shares)
+                          } : p);
+                      }
+                      return [...prev, { symbol: updatedOrder.symbol, shares: updatedOrder.shares, avgCost: updatedOrder.executionPrice }];
+                  });
+              } else {
+                  setCashBalance(prev => prev + totalCost);
+                  setPortfolio(prev => {
+                      const existing = prev.find(p => p.symbol === updatedOrder.symbol);
+                      if (existing) {
+                          const realized = (updatedOrder.executionPrice - existing.avgCost) * updatedOrder.shares;
+                          setRealizedPL(prevPL => prevPL + realized);
+                          if (existing.shares <= updatedOrder.shares) {
+                              return prev.filter(p => p.symbol !== updatedOrder.symbol);
+                          }
+                          return prev.map(p => p.symbol === updatedOrder.symbol ? {
+                              ...p,
+                              shares: p.shares - updatedOrder.shares
+                          } : p);
+                      }
+                      return prev;
+                  });
+              }
+              const mode = updatedOrder.isLive ? 'LIVE' : 'PAPER';
+              addNotification(`${mode} Order Executed`, `Successfully ${updatedOrder.side === 'buy' ? 'bought' : 'sold'} ${updatedOrder.shares} ${updatedOrder.symbol} at ${formatMoney(updatedOrder.executionPrice)}.`, 'success');
+            }
           }
         } catch (err) {
           console.error('Failed to parse WebSocket message', err);
@@ -753,72 +814,6 @@ function App() {
     }, 15000); // Check every 15 seconds
     return () => clearInterval(autoLoop);
   }, []);
-
-  // Order Execution Loop for Limit and Stop-Loss
-  useEffect(() => {
-    if (!isSimConnected || activeOrders.length === 0) return;
-
-    activeOrders.forEach(order => {
-      if (order.status !== 'open') return;
-
-      const stock = stocks.find(s => s.symbol === order.symbol);
-      if (!stock) return;
-
-      let shouldExecute = false;
-
-      if (order.type === 'limit') {
-        if (order.side === 'buy' && stock.price <= order.price) shouldExecute = true;
-        if (order.side === 'sell' && stock.price >= order.price) shouldExecute = true;
-      } else if (order.type === 'stop-loss') {
-        if (order.side === 'sell' && stock.price <= order.price) shouldExecute = true;
-        if (order.side === 'buy' && stock.price >= order.price) shouldExecute = true;
-      }
-
-      if (shouldExecute) {
-        const executionPrice = stock.price;
-        const totalCost = order.shares * executionPrice;
-        
-        setActiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'filled', filledPrice: executionPrice } : o));
-        
-        if (order.side === 'buy') {
-           // For buy orders, the cash was already reserved at the order.price
-           const costDiff = (order.price * order.shares) - totalCost; 
-           setCashBalance(prev => prev + costDiff);
-           
-           setPortfolio(prev => {
-                const existing = prev.find(p => p.symbol === order.symbol);
-                if (existing) {
-                    return prev.map(p => p.symbol === order.symbol ? {
-                        ...p,
-                        shares: p.shares + order.shares,
-                        avgCost: ((p.shares * p.avgCost) + totalCost) / (p.shares + order.shares)
-                    } : p);
-                }
-                return [...prev, { symbol: order.symbol, shares: order.shares, avgCost: executionPrice }];
-           });
-        } else {
-           setCashBalance(prev => prev + totalCost);
-           setPortfolio(prev => {
-                const existing = prev.find(p => p.symbol === order.symbol);
-                if (!existing) return prev;
-                
-                const realized = (executionPrice - existing.avgCost) * order.shares;
-                setRealizedPL(prevPL => prevPL + realized);
-                
-                if (existing.shares <= order.shares) {
-                    return prev.filter(p => p.symbol !== order.symbol);
-                }
-                return prev.map(p => p.symbol === order.symbol ? {
-                    ...p,
-                    shares: p.shares - order.shares
-                } : p);
-           });
-        }
-        
-        addNotification("Order Filled", `${order.type.toUpperCase()} ${order.side.toUpperCase()} for ${order.shares} ${order.symbol} executed at ${formatMoney(executionPrice)}`, 'success');
-      }
-    });
-  }, [stocks, activeOrders, isSimConnected]);
 
   // Bot PnL Simulation Loop
   useEffect(() => {
@@ -1029,123 +1024,25 @@ function App() {
         }
     }
 
-    if (order.type === 'market' && !order.isPreMarket) {
-        // Execute market order immediately
-        if (order.side === 'buy') {
-            setCashBalance(prev => prev - totalCost);
-            setPortfolio(prev => {
-                const existing = prev.find(p => p.symbol === order.symbol);
-                if (existing) {
-                    return prev.map(p => p.symbol === order.symbol ? {
-                        ...p,
-                        shares: p.shares + order.shares,
-                        avgCost: ((p.shares * p.avgCost) + totalCost) / (p.shares + order.shares)
-                    } : p);
-                }
-                return [...prev, { symbol: order.symbol, shares: order.shares, avgCost: orderPrice }];
-            });
-            
-            // If Bracket (TP/SL) was set, create open limit/stop orders
-            if (order.stopLossPrice || order.takeProfitPrice) {
-                const newBracketOrders: ActiveOrder[] = [];
-                if (order.takeProfitPrice) {
-                    newBracketOrders.push({
-                        id: `ord-${Date.now()}-tp`,
-                        symbol: order.symbol,
-                        side: 'sell', // Opposite to buy
-                        type: 'take-profit',
-                        shares: order.shares,
-                        price: order.takeProfitPrice,
-                        timestamp: Date.now(),
-                        status: 'open'
-                    });
-                }
-                if (order.stopLossPrice) {
-                    newBracketOrders.push({
-                        id: `ord-${Date.now()}-sl`,
-                        symbol: order.symbol,
-                        side: 'sell',
-                        type: 'stop-loss',
-                        shares: order.shares,
-                        price: order.stopLossPrice,
-                        timestamp: Date.now(),
-                        status: 'open'
-                    });
-                }
-                if (newBracketOrders.length > 0) setActiveOrders(prev => [...prev, ...newBracketOrders]);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+            type: 'PLACE_ORDER',
+            order: {
+                symbol: order.symbol,
+                side: order.side,
+                type: order.type,
+                shares: order.shares,
+                price: orderPrice,
+                isPreMarket: order.isPreMarket,
+                stopLossPrice: order.stopLossPrice,
+                takeProfitPrice: order.takeProfitPrice,
+                isLive: order.isLive
             }
-        } else {
-            setCashBalance(prev => prev + totalCost);
-            setPortfolio(prev => {
-                const existing = prev.find(p => p.symbol === order.symbol)!;
-                const realized = (orderPrice - existing.avgCost) * order.shares;
-                setRealizedPL(prevPL => prevPL + realized);
-                
-                if (existing.shares === order.shares) {
-                    return prev.filter(p => p.symbol !== order.symbol);
-                }
-                return prev.map(p => p.symbol === order.symbol ? {
-                    ...p,
-                    shares: p.shares - order.shares
-                } : p);
-            });
-            
-            // Bracket for short selling (if supported). Here we mirror the logic
-            if (order.stopLossPrice || order.takeProfitPrice) {
-                const newBracketOrders: ActiveOrder[] = [];
-                if (order.takeProfitPrice) {
-                    newBracketOrders.push({
-                        id: `ord-${Date.now()}-tp`,
-                        symbol: order.symbol,
-                        side: 'buy', // Opposite to sell
-                        type: 'take-profit',
-                        shares: order.shares,
-                        price: order.takeProfitPrice,
-                        timestamp: Date.now(),
-                        status: 'open'
-                    });
-                }
-                if (order.stopLossPrice) {
-                    newBracketOrders.push({
-                        id: `ord-${Date.now()}-sl`,
-                        symbol: order.symbol,
-                        side: 'buy',
-                        type: 'stop-loss',
-                        shares: order.shares,
-                        price: order.stopLossPrice,
-                        timestamp: Date.now(),
-                        status: 'open'
-                    });
-                }
-                if (newBracketOrders.length > 0) setActiveOrders(prev => [...prev, ...newBracketOrders]);
-            }
-        }
-        addNotification(`${mode} Order Executed`, `Successfully ${order.side === 'buy' ? 'bought' : 'sold'} ${order.shares} ${order.symbol} at ${formatMoney(orderPrice)}.`, 'success');
+        }));
+        
+        addNotification(`Order Sent`, `Sent ${mode} order for ${order.shares} ${order.symbol}.`, 'success');
     } else {
-        // Add pending limit/stop-loss/take-profit/pre-market order
-        const newOrder: ActiveOrder = {
-            id: `ord-${Date.now()}`,
-            symbol: order.symbol,
-            side: order.side,
-            type: order.type,
-            shares: order.shares,
-            price: orderPrice,
-            timestamp: Date.now(),
-            status: 'open',
-            isPreMarket: order.isPreMarket,
-            stopLoss: order.stopLossPrice,
-            takeProfit: order.takeProfitPrice
-        };
-        
-        setActiveOrders(prev => [...prev, newOrder]);
-        
-        // For buys, we temporarily reserve cash to prevent over-allocation (simplified)
-        if (order.side === 'buy') {
-            setCashBalance(prev => prev - totalCost);
-        }
-        // For sells, we would ideally reserve shares here, but not strictly needed for this simplified demo
-        
-        addNotification(`${mode} Order Placed`, `${order.isPreMarket ? '[PRE-MARKET] ' : ''}${order.type.toUpperCase()} ${order.side.toUpperCase()} for ${order.shares} ${order.symbol} at ${order.type === 'market' ? 'MKT' : formatMoney(orderPrice)} received.`, 'success');
+        addNotification("Trade Failed", "WebSocket is not connected.", 'alert');
     }
   };
 
@@ -1306,6 +1203,13 @@ function App() {
           >
             <ListTodo className="w-6 h-6 text-sky-500" />
           </button>
+          <button 
+             onClick={() => setActiveView(AppView.TELEGRAM_BOT)}
+             className={`p-3 rounded-xl transition-all ${activeView === AppView.TELEGRAM_BOT ? 'bg-amber-900/40 text-amber-500 shadow-lg shadow-amber-500/20' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'}`}
+             title="Telegram AI Bot"
+          >
+            <Send className="w-6 h-6 text-amber-500" />
+          </button>
         </nav>
       </aside>
 
@@ -1431,6 +1335,10 @@ function App() {
                   onUpdateDataSource={handleUpdateDataSource}
                   onDeleteDataSource={handleDeleteDataSource}
                   onReorderDataSources={handleReorderDataSources}
+                  onLiveTick={(updates) => {
+                    const updatesArr = Object.entries(updates).map(([symbol, price]) => ({ symbol: symbol.replace('USDT', '-USD'), price }));
+                    setStocks(currentStocks => simulateTick(currentStocks, updatesArr as any));
+                  }}
                 />
             ) : activeView === AppView.MASTER_BOT ? (
                 <MasterBotView bots={bots} dataSources={effectiveDataSources} />
@@ -1453,9 +1361,11 @@ function App() {
             ) : activeView === AppView.PREDICTION_MARKETS ? (
                 <PredictionMarketsLab />
             ) : activeView === AppView.SWARM ? (
-                <AgentSwarmArchitect agents={agents} setAgents={setAgents} dataSources={effectiveDataSources} tasks={tasks} setTasks={setTasks} />
+                <AgentSwarmArchitect agents={agents} setAgents={setAgents} dataSources={effectiveDataSources} tasks={tasks} setTasks={setTasks} stocks={stocks} />
             ) : activeView === AppView.TASKS ? (
                 <AgentTasks tasks={tasks} setTasks={setTasks} agents={agents} dataSources={effectiveDataSources} />
+            ) : activeView === AppView.TELEGRAM_BOT ? (
+                <TelegramConnect />
             ) : activeView === AppView.BOTS ? (
                <BotLab 
                 stocks={stocks} 

@@ -77,7 +77,7 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
     setIsTesting(true);
     setResult(null);
 
-    // Simulate backtesting process
+    // Simulate backtesting process or use Live data
     setTimeout(() => {
       let days = timeframe === '1M' ? 30 : timeframe === '3M' ? 90 : timeframe === '6M' ? 180 : 365;
       let finalEndDate = new Date();
@@ -97,35 +97,69 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
       let peak = equity;
       let maxDrawdown = 0;
       let wins = 0;
-      const totalTrades = Math.floor(Math.random() * 50) + 10;
+      let totalTrades = 0;
+      
+      if (dataSource === 'Live') {
+          const targetStock = stocks.find(s => s.symbol === selectedSymbol);
+          if (targetStock && targetStock.history.length > 0) {
+              const history = targetStock.history;
+              let currentPrice = history[0].price;
+              totalTrades = history.length - 1;
+              for (let i = 0; i < history.length; i++) {
+                 const step = history[i];
+                 if (i > 0) {
+                    const prevStep = history[i-1];
+                    const changePct = (step.price - prevStep.price) / prevStep.price;
+                    const bias = isSwarmMode ? 0.001 : 0;
+                    equity = equity * (1 + changePct + bias);
+                    if (step.price > prevStep.price) wins++;
+                 }
+                 if (equity > peak) peak = equity;
+                 const drawdown = ((peak - equity) / peak) * 100;
+                 if (drawdown > maxDrawdown) maxDrawdown = drawdown;
 
-      for (let i = days; i >= 0; i--) {
-        const date = new Date(finalEndDate);
-        date.setDate(date.getDate() - i);
-        
-        // Random walk with slight upward bias for equity
-        // Swarm mode and auto switch reduce volatility and increase bias
-        const volatility = isSwarmMode ? 0.01 : 0.02 + (stopLossPct / 100);
-        const bias = autoSwitch ? 0.40 : 0.45 - (takeProfitPct / 200);
-        const change = (Math.random() - bias) * (equity * volatility);
-        equity += change;
-        
-        if (equity > peak) peak = equity;
-        const drawdown = ((peak - equity) / peak) * 100;
-        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-
-        chartData.push({
-          date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          equity: Math.round(equity)
-        });
+                 chartData.push({
+                   date: step.time, // using time instead of date for live
+                   equity: Math.round(equity)
+                 });
+              }
+              // If there's no trades, just fallback
+              if (totalTrades === 0) totalTrades = 1;
+          } else {
+             // Fallback if no history yet
+             chartData.push({ date: new Date().toLocaleTimeString(), equity });
+             totalTrades = 1;
+             wins = 1;
+          }
+      } else {
+          totalTrades = Math.floor(Math.random() * 50) + 10;
+          for (let i = days; i >= 0; i--) {
+            const date = new Date(finalEndDate);
+            date.setDate(date.getDate() - i);
+            
+            // Random walk with slight upward bias for equity
+            // Swarm mode and auto switch reduce volatility and increase bias
+            const volatility = isSwarmMode ? 0.01 : 0.02 + (stopLossPct / 100);
+            const bias = autoSwitch ? 0.40 : 0.45 - (takeProfitPct / 200);
+            const change = (Math.random() - bias) * (equity * volatility);
+            equity += change;
+            
+            if (equity > peak) peak = equity;
+            const drawdown = ((peak - equity) / peak) * 100;
+            if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    
+            chartData.push({
+              date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+              equity: Math.round(equity)
+            });
+          }
+          const baseWinRate = isSwarmMode ? 0.5 : 0.4;
+          const winRateVariance = autoSwitch ? 0.3 : 0.4;
+          const winRate = (Math.random() * winRateVariance + baseWinRate);
+          wins = Math.floor(totalTrades * winRate);
       }
 
-      // Swarm mode and auto switch increase win rate
-      const baseWinRate = isSwarmMode ? 0.5 : 0.4;
-      const winRateVariance = autoSwitch ? 0.3 : 0.4;
-      const winRate = (Math.random() * winRateVariance + baseWinRate);
-      wins = Math.floor(totalTrades * winRate);
-      
+      const winRate = (wins / totalTrades) * 100;
       const sharpeRatio = (Math.random() * 2) + 0.5 + (isSwarmMode ? 0.5 : 0);
       const sortinoRatio = sharpeRatio * (Math.random() * 0.5 + 1.2);
       const maxConsecutiveWins = Math.floor(Math.random() * 8) + 3 + (isSwarmMode ? 2 : 0);
