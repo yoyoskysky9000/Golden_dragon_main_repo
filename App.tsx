@@ -784,30 +784,34 @@ function App() {
                   const targetInvestment = totalEquity * kellyFraction;
                   const sharesToTrade = Math.max(1, Math.floor(targetInvestment / signal.price));
 
-                  handlePlaceOrder({
+                  const executionSuccess = handlePlaceOrder({
                     symbol: signal.symbol,
                     side: signal.signal === 'buy' ? 'buy' : 'sell',
                     type: 'market',
                     shares: sharesToTrade,
                     price: signal.price,
                     isLive: bot.isLive
-                  });
+                  }, true); // pass true for skipConfirmation
+                  
+                  if (!executionSuccess) {
+                      throw new Error(`Order execution failed or rejected.`);
+                  }
                   
                   addNotification("Kelly Criterion Sizing", `Allocating ${(kellyFraction * 100).toFixed(1)}% of equity based on ${signal.confidence}% confidence.`, 'success');
                 }
               }
             }
           } catch (err) {
-            console.error("Auto-trading signal generation failed:", err);
+            console.error("Auto-trading operation failed:", err);
             setBots(currentBots => currentBots.map(b => {
                if (b.id !== bot.id) return b;
                return {
                  ...b,
                  status: 'error',
-                 errorMessage: err instanceof Error ? err.message : 'Error generating signal'
+                 errorMessage: err instanceof Error ? err.message : 'Error generating or executing signal'
                };
             }));
-            addNotification("Bot Error", `${bot.name} encountered an error during signal generation.`, 'alert');
+            addNotification("Bot Error", `${bot.name} encountered an error: ${err instanceof Error ? err.message : 'Unknown'}`, 'alert');
           }
         }
       }
@@ -982,13 +986,13 @@ function App() {
     if (!isSimConnectedRef.current) {
         addNotification("Trade Failed", "Please connect an exchange first.", 'alert');
         setActiveView(AppView.CONNECTIONS);
-        return;
+        return false;
     }
     
     const stock = stocksRef.current.find(s => s.symbol === order.symbol);
     if (!stock) {
         addNotification("Trade Failed", "Invalid stock symbol.", 'alert');
-        return;
+        return false;
     }
 
     const orderPrice = order.type === 'market' ? stock.price : (order.price || stock.price);
@@ -1005,7 +1009,7 @@ function App() {
             isLive: order.isLive,
             originalOrder: order
         });
-        return;
+        return true;
     }
 
     const mode = order.isLive ? 'LIVE' : 'PAPER';
@@ -1014,13 +1018,13 @@ function App() {
     if (order.side === 'buy') {
         if (totalCost > cashBalanceRef.current) {
             addNotification("Insufficient Funds", `Required: ${formatMoney(totalCost)}. Available: ${formatMoney(cashBalanceRef.current)}`, 'alert');
-            return;
+            return false;
         }
     } else {
         const position = portfolioRef.current.find(p => p.symbol === order.symbol);
         if (!position || position.shares < order.shares) {
             addNotification("Insufficient Shares", `Cannot sell ${order.shares} shares. You own ${position?.shares || 0}.`, 'alert');
-            return;
+            return false;
         }
     }
 
@@ -1041,8 +1045,10 @@ function App() {
         }));
         
         addNotification(`Order Sent`, `Sent ${mode} order for ${order.shares} ${order.symbol}.`, 'success');
+        return true;
     } else {
         addNotification("Trade Failed", "WebSocket is not connected.", 'alert');
+        return false;
     }
   };
 
@@ -1374,7 +1380,7 @@ function App() {
                 selectedSymbol={selectedSymbol}
                 onAddBot={(b) => setBots(prev => [...prev, b])} 
                 onDeleteBot={(id) => setBots(prev => prev.filter(b => b.id !== id))} 
-                onToggleBot={(id) => setBots(prev => prev.map(b => b.id === id ? {...b, status: b.status === 'active' ? 'paused' : 'active'} : b))} 
+                onToggleBot={(id) => setBots(prev => prev.map(b => b.id === id ? {...b, status: b.status === 'active' ? 'paused' : 'active', errorMessage: undefined} : b))} 
                 onUpdateBot={(updatedBot) => setBots(prev => prev.map(b => b.id === updatedBot.id ? updatedBot : b))}
                 onAddDataSource={handleAddDataSource}
                 onUpdateDataSource={handleUpdateDataSource}

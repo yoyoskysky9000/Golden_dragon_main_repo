@@ -296,6 +296,26 @@ export enum AppView {
   TELEGRAM_BOT = 'TELEGRAM_BOT'
 }
 
+export interface UserTrade {
+  id?: string;
+  userId: string;
+  status: 'pending' | 'executed' | 'failed';
+  symbol: string;
+  side: 'buy' | 'sell' | 'long' | 'short';
+  sizeUsd: number;
+  price?: number;
+  timestamp: number; // Immutable timestamp
+}
+
+export interface AgentStateRecord {
+  id?: string;
+  agentId: string;
+  status: 'idle' | 'running' | 'error';
+  pnl: number;
+  openPositions: number;
+  lastUpdated: number;
+}
+
 export interface AgentTask {
   id: string;
   title: string;

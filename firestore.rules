@@ -28,7 +28,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isSignedIn() && request.auth.uid == userId;
       // You can only create your own account
       allow create: if isSignedIn() && 
                        request.auth.uid == userId && 
@@ -104,8 +104,37 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() && existing().sellerId == request.auth.uid;
     }
+    // Trades Collection Rules
     match /trades/{tradeId} {
-      allow read, write: if true;
+      // Users can read their own trades
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Document creation requires a verified userId matching the authenticating user, a strict status enum, and an immutable timestamp.
+      allow create: if isSignedIn() 
+                    && incoming().userId == request.auth.uid 
+                    && (incoming().status in ['pending', 'executed', 'failed'])
+                    && (incoming().timestamp is timestamp || incoming().timestamp is number);
+      
+      // Never delete or modify an executed trade
+      allow update: if isSignedIn() 
+                    && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId // Immutable userId
+                    && incoming().timestamp == existing().timestamp // Immutable timestamp
+                    && existing().status != 'executed' // Cannot modify an executed trade
+                    && (incoming().status in ['pending', 'executed', 'failed']);
+                    
+      allow delete: if isSignedIn() 
+                    && existing().userId == request.auth.uid 
+                    && existing().status != 'executed'; // Cannot delete an executed trade
+    }
+
+    // AgentStates Collection Rules
+    match /agentStates/{stateId} {
+      // Authenticated users can read it to see live bot metrics
+      allow read: if request.auth != null;
+      
+      // Only server-side admin processes can write to this collection
+      allow write: if false;
     }
   }
 }

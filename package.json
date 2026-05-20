@@ -15,6 +15,7 @@
     "@tailwindcss/vite": "^4.2.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/node-telegram-bot-api": "^0.64.14",
     "ccxt": "^4.5.40",
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
@@ -26,6 +27,7 @@
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.555.0",
     "motion": "^12.34.3",
+    "node-telegram-bot-api": "^0.67.0",
     "otplib": "^13.4.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
@@ -35,7 +37,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
-    "ws": "^8.19.0",
+    "ws": "^8.20.1",
     "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {

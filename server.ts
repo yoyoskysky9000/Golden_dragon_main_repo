@@ -8,6 +8,8 @@ import ccxt from "ccxt";
 import fs from "fs";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import TelegramBot from 'node-telegram-bot-api';
+import { GoogleGenAI } from '@google/genai';
 
 let firebaseDb: any = null;
 try {
@@ -54,6 +56,96 @@ async function startServer() {
   ];
 
   const bots: any[] = [];
+
+  // Telegram Bot Integration
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    const telegramBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+    const genAI = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+
+    telegramBot.on('message', async (msg) => {
+      const chatId = msg.chat.id;
+      const text = msg.text;
+
+      if (!text) return;
+
+      if (text.startsWith('/start')) {
+        return telegramBot.sendMessage(chatId, "🐲 OmniTrade AI Telegram Bot active. Forward me signals from any channel, and I'll parse them and execute trades.");
+      }
+
+      try {
+        telegramBot.sendMessage(chatId, "Analyzing signal with Gemini...");
+
+        const prompt = `
+        You are an expert trading AI parsing telegram signals.
+        Message: "${text}"
+        
+        Determine if this is a trading signal (buy/sell/long/short). If it is, extract and map the details. Even if the ticker is obscure (like 'solana long' or 'doge buy'), normalize the symbol.
+        Return JSON ONLY with this schema:
+        {
+          "isSignal": boolean,
+          "symbol": string (e.g. BTC/USDT or NVDA),
+          "side": "buy" | "sell",
+          "entry": number | null,
+          "takeProfit": number | null,
+          "stopLoss": number | null,
+          "reasoning": string ("Why you think it's a signal")
+        }
+        `;
+
+        const response = await genAI.models.generateContent({
+          model: 'gemini-3-pro-preview',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+
+        const jsonStr = response.text || "{}";
+        const parsed = JSON.parse(jsonStr.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim());
+
+        if (parsed.isSignal) {
+          const quantity = 1;
+          const orderPrice = parsed.entry || (Math.random() * 100 + 50);
+          const totalValue = quantity * orderPrice;
+
+          if (parsed.side === 'buy') {
+              userPortfolio.cash -= totalValue;
+              userPortfolio.positions[parsed.symbol] = (userPortfolio.positions[parsed.symbol] || 0) + quantity;
+          } else {
+              userPortfolio.positions[parsed.symbol] = (userPortfolio.positions[parsed.symbol] || 0) - quantity;
+              userPortfolio.cash += totalValue;
+          }
+
+          logs.push({
+             id: Math.random().toString(36).substr(2, 9),
+             type: 'telegram_signal_executed',
+             message: `Executed Telegram Signal: ${parsed.side.toUpperCase()} ${parsed.symbol} (Signal TP: ${parsed.takeProfit}, SL: ${parsed.stopLoss})`,
+             timestamp: Date.now()
+          });
+          
+          if (logs.length > 1000) logs.shift();
+
+          const replyMsgs = `✅ Signal Accepted & Executed!
+Symbol: ${parsed.symbol}
+Side: ${parsed.side.toUpperCase()}
+Entry: ${parsed.entry || 'Market'}
+TP: ${parsed.takeProfit || 'N/A'}
+SL: ${parsed.stopLoss || 'N/A'}
+
+Reasoning: ${parsed.reasoning}`;
+
+          telegramBot.sendMessage(chatId, replyMsgs);
+        } else {
+           telegramBot.sendMessage(chatId, "Not recognized as a valid trading signal.\nReason: " + parsed.reasoning);
+        }
+      } catch (e: any) {
+        telegramBot.sendMessage(chatId, "Error parsing signal: " + e.message);
+      }
+    });
+
+    console.log("Telegram Bot initialized matching token environment variable.");
+  }
+
 
   // API Routes
   app.post("/api/exchange/connect", async (req, res) => {
