@@ -133,6 +133,15 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
 
     for (let i = 0; i < 4; i++) {
         const historyForApi = localMessages.slice(-5).map(m => ({ role: m.role, parts: [{ text: m.text }] }));
+        
+        // Inject current strategy and recent price history into the context
+        const recentPrices = selectedStock.history.slice(-10).map(h => `$${h.price.toFixed(2)}`).join(', ');
+        const botStrategy = "Arbitrage and temporal RSI optimization";
+        historyForApi.unshift({ 
+            role: 'user', 
+            parts: [{ text: `[SYSTEM CONTEXT: Current Bot Strategy: ${botStrategy}. Recent ${selectedStock.symbol} prices: ${recentPrices}]` }] 
+        });
+
         const response = await chatWithAnalyst(historyForApi, currentText);
         
         let shouldContinue = false;
@@ -406,8 +415,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
                 transition={{ duration: 0.2, ease: "easeOut" }}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className={`max-w-[90%] rounded-xl p-3 text-[11px] leading-relaxed ${msg.role === 'user' ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-800/80 text-gray-300 border border-gray-700 backdrop-blur-sm'}`}>
-                  {msg.text}
+                <div className={`max-w-[90%] rounded-xl p-3 text-[11px] leading-relaxed whitespace-pre-wrap ${msg.role === 'user' ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-800/80 text-gray-300 border border-gray-700 backdrop-blur-sm'}`}>
+                  {msg.role === 'model' ? <div dangerouslySetInnerHTML={{ __html: formatMarkdown(msg.text) }} /> : msg.text}
                 </div>
               </motion.div>
             ))}
@@ -441,6 +450,26 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ selectedStock, initialMessage
       </div>
 
       <div className="p-4 border-t border-gray-800 bg-gray-950">
+        <div className="mb-3 flex justify-end">
+          <button 
+            type="button" 
+            onClick={async () => {
+              setIsChatting(true);
+              setMessages(prev => [...prev, { role: 'user', text: `Get real-time signal for ${selectedStock.symbol}`, timestamp: Date.now() }]);
+              try {
+                const signal = await getRealtimeSignal(selectedStock);
+                setMessages(prev => [...prev, { role: 'model', text: `[REAL-TIME SIGNAL]\n${signal}`, timestamp: Date.now() }]);
+              } catch (e) {
+                setMessages(prev => [...prev, { role: 'model', text: `Failed to fetch signal.`, timestamp: Date.now() }]);
+              }
+              setIsChatting(false);
+            }} 
+            disabled={isChatting} 
+            className="text-[10px] bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg hover:bg-emerald-500/20 flex items-center gap-1 transition-colors font-bold tracking-wider uppercase"
+          >
+            <Activity className="w-3 h-3" /> Get AI Signal
+          </button>
+        </div>
         <form onSubmit={handleSendMessage} className="relative">
           <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Query the Oracle..." className="w-full bg-gray-900 text-gray-200 text-xs rounded-xl pl-4 pr-10 py-3 border border-gray-800 focus:outline-none focus:border-amber-600 transition-all font-mono" />
           <button type="submit" disabled={!chatInput.trim() || isChatting} className="absolute right-2 top-2 p-1.5 text-gray-500 hover:text-amber-500 disabled:opacity-50"><Send className="w-4 h-4" /></button>

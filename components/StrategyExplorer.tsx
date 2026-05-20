@@ -150,9 +150,32 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
         indicator: tuningResult.indicator,
         condition: tuningResult.condition,
         value: tuningResult.value,
-        action: tuningResult.action
+        action: tuningResult.action,
+        takeProfit: tuningResult.takeProfit,
+        stopLoss: tuningResult.stopLoss
       });
       setTuningResult(null);
+    }
+  };
+
+  const [savedConfigs, setSavedConfigs] = useState<{name: string, strategy: TradingBot['strategy']}[]>(() => {
+    const saved = localStorage.getItem('omnitrade_saved_strategies');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [configName, setConfigName] = useState('');
+
+  const handleSaveConfig = () => {
+    if (!configName.trim()) return;
+    const newConfigs = [...savedConfigs, { name: configName, strategy }];
+    setSavedConfigs(newConfigs);
+    localStorage.setItem('omnitrade_saved_strategies', JSON.stringify(newConfigs));
+    setConfigName('');
+  };
+
+  const handleLoadConfig = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const config = savedConfigs.find(c => c.name === e.target.value);
+    if (config) {
+      setStrategy(config.strategy);
     }
   };
 
@@ -189,6 +212,36 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                     <option key={s.symbol} value={s.symbol}>{s.symbol} - {s.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Strategy Configuration</label>
+                <div className="flex flex-col gap-2">
+                  <select 
+                    onChange={handleLoadConfig}
+                    className="w-full bg-gray-950 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+                    defaultValue=""
+                  >
+                    <option value="" disabled>Load Saved Strategy...</option>
+                    {savedConfigs.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Strategy Name"
+                      value={configName}
+                      onChange={(e) => setConfigName(e.target.value)}
+                      className="flex-1 bg-gray-950 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      onClick={handleSaveConfig}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
+                      disabled={!configName.trim()}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -254,6 +307,31 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                   >
                     Sell
                   </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Take Profit (%)</label>
+                  <input 
+                    type="number"
+                    step="0.1"
+                    value={strategy.takeProfit || ''}
+                    onChange={(e) => setStrategy({...strategy, takeProfit: e.target.value})}
+                    className="w-full bg-gray-950 border border-emerald-500/30 rounded-xl px-4 py-3 text-sm text-emerald-400 focus:outline-none focus:border-emerald-500 font-mono"
+                    placeholder="e.g. 5.0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Stop Loss (%)</label>
+                  <input 
+                    type="number"
+                    step="0.1"
+                    value={strategy.stopLoss || ''}
+                    onChange={(e) => setStrategy({...strategy, stopLoss: e.target.value})}
+                    className="w-full bg-gray-950 border border-rose-500/30 rounded-xl px-4 py-3 text-sm text-rose-400 focus:outline-none focus:border-rose-500 font-mono"
+                    placeholder="e.g. 2.0"
+                  />
                 </div>
               </div>
 
@@ -366,6 +444,18 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                    <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Condition</div>
                    <div className="text-sm text-white font-bold">{tuningResult.condition} {tuningResult.value}</div>
                 </div>
+                {tuningResult.takeProfit && (
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Take Profit</div>
+                    <div className="text-sm text-emerald-400 font-bold">{tuningResult.takeProfit}%</div>
+                  </div>
+                )}
+                {tuningResult.stopLoss && (
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Stop Loss</div>
+                    <div className="text-sm text-rose-400 font-bold">{tuningResult.stopLoss}%</div>
+                  </div>
+                )}
               </div>
 
               <button 

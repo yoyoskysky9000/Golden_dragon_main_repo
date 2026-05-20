@@ -636,6 +636,8 @@ export const tuneParameters = async (
     condition: string;
     value: string;
     action: 'BUY' | 'SELL';
+    takeProfit?: string;
+    stopLoss?: string;
     reasoning: string;
 } | null> => {
     if (!process.env.API_KEY) return null;
@@ -651,7 +653,7 @@ export const tuneParameters = async (
         TASK:
         The user wants to tune this strategy for better performance. Look at the backtest metrics and market data.
         If win rate is low, perhaps make the condition stricter. If trades are too few, make it looser.
-        Suggest a minor parameter tweak (e.g., changing RSI from 30 to 28, or MACD threshold).
+        Suggest parameter tweaks (e.g., changing RSI from 30 to 28), and consider suggesting a takeProfit (e.g. 5.0) and stopLoss (e.g. 2.0).
         Keep the same indicator if possible, just tweak the value or condition slightly.
 
         OUTPUT JSON ONLY.
@@ -670,6 +672,8 @@ export const tuneParameters = async (
                         condition: { type: Type.STRING },
                         value: { type: Type.STRING },
                         action: { type: Type.STRING },
+                        takeProfit: { type: Type.STRING },
+                        stopLoss: { type: Type.STRING },
                         reasoning: { type: Type.STRING }
                     }
                 }

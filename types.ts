@@ -165,6 +165,8 @@ export interface TradingBot {
     condition: string;
     value: string;
     action: 'buy' | 'sell';
+    stopLoss?: string;
+    takeProfit?: string;
     logic?: 'AND' | 'OR';
     additionalRules?: {
       indicator: string;
