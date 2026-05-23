@@ -33,9 +33,10 @@ import {
 
 interface StrategyExplorerProps {
   stocks: StockData[];
+  onDeployBot?: (bot: TradingBot) => void;
 }
 
-const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
+const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks, onDeployBot }) => {
   const [selectedSymbol, setSelectedSymbol] = useState(stocks[0]?.symbol || 'NVDA');
   const [strategy, setStrategy] = useState<TradingBot['strategy']>({
     indicator: 'RSI',
@@ -160,7 +161,26 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
 
   const [savedConfigs, setSavedConfigs] = useState<{name: string, strategy: TradingBot['strategy']}[]>(() => {
     const saved = localStorage.getItem('omnitrade_saved_strategies');
-    return saved ? JSON.parse(saved) : [];
+    const parsed = saved ? JSON.parse(saved) : [];
+    const defaults = [
+      {
+        name: 'RSI + Bollinger Reversal',
+        strategy: {
+          indicator: 'RSI_BOLLINGER',
+          condition: 'LT',
+          value: '30',
+          action: 'buy',
+          takeProfit: '3.0',
+          stopLoss: '1.5'
+        }
+      }
+    ];
+    defaults.forEach(def => {
+      if (!parsed.find((p: any) => p.name === def.name)) {
+        parsed.unshift(def);
+      }
+    });
+    return parsed;
   });
   const [configName, setConfigName] = useState('');
 
@@ -263,6 +283,7 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                     <option value="RESISTANCE">Resistance Level / Breakout</option>
                     <option value="SUPPORT">Support Level / Bounce</option>
                     <option value="CUSTOM_COMBO">Custom AI Combo Signal</option>
+                    <option value="RSI_BOLLINGER">RSI + Bollinger (Reversal)</option>
                   </select>
                 </div>
                 <div>
@@ -374,6 +395,30 @@ const StrategyExplorer: React.FC<StrategyExplorerProps> = ({ stocks }) => {
                     </button>
                   </div>
                 )}
+                
+                <button 
+                  onClick={() => {
+                    const newBot: TradingBot = {
+                      id: 'bot-' + Date.now(),
+                      name: configName || `${strategy.indicator} Setup`,
+                      symbol: selectedSymbol,
+                      type: 'custom',
+                      status: 'active',
+                      pnl: 0,
+                      pnlPercent: 0,
+                      trades: 0,
+                      strategy: { ...strategy },
+                      autoMode: true,
+                      isLive: false,
+                      dataSources: []
+                    };
+                    if (onDeployBot) onDeployBot(newBot);
+                  }}
+                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <Target className="w-5 h-5" />
+                  Deploy Strategy to BotLab
+                </button>
               </div>
             </div>
           </div>

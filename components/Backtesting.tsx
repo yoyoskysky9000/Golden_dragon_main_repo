@@ -19,7 +19,12 @@ interface BacktestResult {
   sortinoRatio: number;
   maxConsecutiveWins: number;
   maxConsecutiveLosses: number;
-  chartData: { date: string; equity: number }[];
+  chartData: any[]; // relaxed typing for multi-lines if needed
+  monteCarlo?: {
+    p5Return: number;
+    p95Return: number;
+    medianReturn: number;
+  };
 }
 
 export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: BacktestingProps & { onUpdateBot?: (bot: TradingBot) => void }) {
@@ -30,6 +35,7 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
   const [dataSource, setDataSource] = useState<'Live' | 'Historical' | 'Custom CSV'>('Historical');
   const [isSwarmMode, setIsSwarmMode] = useState(false);
   const [autoSwitch, setAutoSwitch] = useState(false);
+  const [isMonteCarlo, setIsMonteCarlo] = useState(false);
   const [timeToRun, setTimeToRun] = useState<number>(24);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -99,6 +105,14 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
       let wins = 0;
       let totalTrades = 0;
       
+      let maxConsecutiveWins = 0;
+      let maxConsecutiveLosses = 0;
+      let sharpeRatio = 0;
+      let sortinoRatio = 0;
+      let winRate = 0;
+      let totalReturn = 0;
+      let monteCarloStats: any = null;
+
       if (dataSource === 'Live') {
           const targetStock = stocks.find(s => s.symbol === selectedSymbol);
           if (targetStock && targetStock.history.length > 0) {
@@ -131,49 +145,134 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
              totalTrades = 1;
              wins = 1;
           }
+          winRate = (wins / totalTrades) * 100;
+          sharpeRatio = (Math.random() * 2) + 0.5 + (isSwarmMode ? 0.5 : 0);
+          sortinoRatio = sharpeRatio * (Math.random() * 0.5 + 1.2);
+          maxConsecutiveWins = Math.floor(Math.random() * 8) + 3 + (isSwarmMode ? 2 : 0);
+          maxConsecutiveLosses = Math.floor(Math.random() * 5) + 2 - (autoSwitch ? 1 : 0);
+          totalReturn = ((equity - startingCapital) / startingCapital) * 100;
       } else {
-          totalTrades = Math.floor(Math.random() * 50) + 10;
-          for (let i = days; i >= 0; i--) {
-            const date = new Date(finalEndDate);
-            date.setDate(date.getDate() - i);
-            
-            // Random walk with slight upward bias for equity
-            // Swarm mode and auto switch reduce volatility and increase bias
-            const volatility = isSwarmMode ? 0.01 : 0.02 + (stopLossPct / 100);
-            const bias = autoSwitch ? 0.40 : 0.45 - (takeProfitPct / 200);
-            const change = (Math.random() - bias) * (equity * volatility);
-            equity += change;
-            
-            if (equity > peak) peak = equity;
-            const drawdown = ((peak - equity) / peak) * 100;
-            if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-    
-            chartData.push({
-              date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-              equity: Math.round(equity)
-            });
+          if (isMonteCarlo) {
+             const numSimulations = 100;
+             const allReturns = [];
+             const allWinRates = [];
+             const allMaxDrawdowns = [];
+             const allSharpes = [];
+             const allSortinos = [];
+             const allCurves = [];
+             let totalTradesAgg = 0;
+
+             for (let sim = 0; sim < numSimulations; sim++) {
+                let simEquity = startingCapital;
+                let simPeak = simEquity;
+                let simMaxDrawdown = 0;
+                let simChartData = [];
+                let simTrades = Math.floor(Math.random() * 50) + 10;
+                totalTradesAgg += simTrades;
+
+                for (let i = days; i >= 0; i--) {
+                   const date = new Date(finalEndDate);
+                   date.setDate(date.getDate() - i);
+                   const volatility = isSwarmMode ? 0.01 : 0.02 + (stopLossPct / 100);
+                   const bias = autoSwitch ? 0.40 : 0.45 - (takeProfitPct / 200);
+                   const change = (Math.random() - bias) * (simEquity * volatility);
+                   simEquity += change;
+                   if (simEquity > simPeak) simPeak = simEquity;
+                   const drawdown = ((simPeak - simEquity) / simPeak) * 100;
+                   if (drawdown > simMaxDrawdown) simMaxDrawdown = drawdown;
+                   simChartData.push({
+                      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                      equity: Math.round(simEquity)
+                   });
+                }
+                const ret = ((simEquity - startingCapital) / startingCapital) * 100;
+                allReturns.push(ret);
+                const baseWinRate = isSwarmMode ? 0.5 : 0.4;
+                const winRateVariance = autoSwitch ? 0.3 : 0.4;
+                const simWinRate = (Math.random() * winRateVariance + baseWinRate);
+                allWinRates.push(simWinRate);
+                allMaxDrawdowns.push(simMaxDrawdown);
+                const simSharpe = (Math.random() * 2) + 0.5 + (isSwarmMode ? 0.5 : 0);
+                allSharpes.push(simSharpe);
+                allSortinos.push(simSharpe * (Math.random() * 0.5 + 1.2));
+                allCurves.push(simChartData);
+             }
+
+             allReturns.sort((a,b) => a - b);
+             allWinRates.sort((a,b) => a - b);
+             allMaxDrawdowns.sort((a,b) => a - b);
+
+             // Aggregated metrics
+             winRate = allWinRates[Math.floor(numSimulations/2)] * 100;
+             maxDrawdown = allMaxDrawdowns[Math.floor(numSimulations/2)];
+             sharpeRatio = allSharpes.reduce((a,b)=>a+b, 0) / numSimulations;
+             sortinoRatio = allSortinos.reduce((a,b)=>a+b, 0) / numSimulations;
+             totalTrades = Math.floor(totalTradesAgg / numSimulations);
+             maxConsecutiveWins = Math.floor(Math.random() * 8) + 3 + (isSwarmMode ? 2 : 0);
+             maxConsecutiveLosses = Math.floor(Math.random() * 5) + 2 - (autoSwitch ? 1 : 0);
+             totalReturn = allReturns[Math.floor(numSimulations/2)];
+
+             monteCarloStats = {
+                p5Return: allReturns[Math.floor(numSimulations * 0.05)],
+                p95Return: allReturns[Math.floor(numSimulations * 0.95)],
+                medianReturn: totalReturn
+             };
+
+             // Build consolidated chart data
+             for (let i = 0; i <= days; i++) {
+                let dayEquities = allCurves.map(c => c[i].equity).sort((a,b)=>a-b);
+                chartData.push({
+                   date: allCurves[0][i].date,
+                   equity: dayEquities[Math.floor(numSimulations/2)],
+                   worstCase: dayEquities[Math.floor(numSimulations*0.05)], // 5th pctile equity line
+                   bestCase: dayEquities[Math.floor(numSimulations*0.95)] // 95th pctile equity line
+                });
+             }
+
+          } else {
+             totalTrades = Math.floor(Math.random() * 50) + 10;
+             for (let i = days; i >= 0; i--) {
+               const date = new Date(finalEndDate);
+               date.setDate(date.getDate() - i);
+               
+               const volatility = isSwarmMode ? 0.01 : 0.02 + (stopLossPct / 100);
+               const bias = autoSwitch ? 0.40 : 0.45 - (takeProfitPct / 200);
+               const change = (Math.random() - bias) * (equity * volatility);
+               equity += change;
+               
+               if (equity > peak) peak = equity;
+               const drawdown = ((peak - equity) / peak) * 100;
+               if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+       
+               chartData.push({
+                 date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                 equity: Math.round(equity)
+               });
+             }
+             const baseWinRate = isSwarmMode ? 0.5 : 0.4;
+             const winRateVariance = autoSwitch ? 0.3 : 0.4;
+             const generatedWinRate = (Math.random() * winRateVariance + baseWinRate);
+             wins = Math.floor(totalTrades * generatedWinRate);
+
+             winRate = (wins / totalTrades) * 100;
+             sharpeRatio = (Math.random() * 2) + 0.5 + (isSwarmMode ? 0.5 : 0);
+             sortinoRatio = sharpeRatio * (Math.random() * 0.5 + 1.2);
+             maxConsecutiveWins = Math.floor(Math.random() * 8) + 3 + (isSwarmMode ? 2 : 0);
+             maxConsecutiveLosses = Math.floor(Math.random() * 5) + 2 - (autoSwitch ? 1 : 0);
+             totalReturn = ((equity - startingCapital) / startingCapital) * 100;
           }
-          const baseWinRate = isSwarmMode ? 0.5 : 0.4;
-          const winRateVariance = autoSwitch ? 0.3 : 0.4;
-          const winRate = (Math.random() * winRateVariance + baseWinRate);
-          wins = Math.floor(totalTrades * winRate);
       }
 
-      const winRate = (wins / totalTrades) * 100;
-      const sharpeRatio = (Math.random() * 2) + 0.5 + (isSwarmMode ? 0.5 : 0);
-      const sortinoRatio = sharpeRatio * (Math.random() * 0.5 + 1.2);
-      const maxConsecutiveWins = Math.floor(Math.random() * 8) + 3 + (isSwarmMode ? 2 : 0);
-      const maxConsecutiveLosses = Math.floor(Math.random() * 5) + 2 - (autoSwitch ? 1 : 0);
-
       const metrics = {
-        totalReturn: ((equity - startingCapital) / startingCapital) * 100,
-        winRate: winRate * 100,
+        totalReturn,
+        winRate,
         maxDrawdown,
         totalTrades,
         sharpeRatio,
         sortinoRatio,
         maxConsecutiveWins,
         maxConsecutiveLosses,
+        monteCarlo: monteCarloStats
       };
 
       setResult({
@@ -438,6 +537,16 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
                   </div>
                 </label>
 
+                <label className="flex items-center gap-3 cursor-pointer group" onClick={() => setIsMonteCarlo(!isMonteCarlo)}>
+                  <div className={`relative w-12 h-6 transition-colors rounded-full ${isMonteCarlo ? 'bg-amber-600' : 'bg-gray-800'}`}>
+                    <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${isMonteCarlo ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-white group-hover:text-amber-400 transition-colors">Monte Carlo Simulation</span>
+                    <span className="text-xs text-gray-500">Run 100+ variations to estimate robust confidence intervals</span>
+                  </div>
+                </label>
+
                 <label className="flex items-center gap-3 cursor-pointer group" onClick={() => setAutoSwitch(!autoSwitch)}>
                   <div className={`relative w-12 h-6 transition-colors rounded-full ${autoSwitch ? 'bg-emerald-600' : 'bg-gray-800'}`}>
                     <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${autoSwitch ? 'translate-x-6' : 'translate-x-0'}`} />
@@ -498,6 +607,11 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
                   <div className={`text-lg font-bold ${result.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {formatPct(result.totalReturn)}
                   </div>
+                  {result.monteCarlo && (
+                    <div className="text-[10px] text-gray-500 mt-1 font-mono">
+                      90% CI: [{formatPct(result.monteCarlo.p5Return)}, {formatPct(result.monteCarlo.p95Return)}]
+                    </div>
+                  )}
                 </motion.div>
                 <motion.div whileHover={{ scale: 1.02 }} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="text-xs text-gray-500 uppercase font-bold mb-1">Win Rate</div>
@@ -574,7 +688,12 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#111827', borderColor: '#374151', borderRadius: '0.5rem' }}
                         itemStyle={{ color: '#10B981', fontWeight: 'bold' }}
-                        formatter={(value: number) => [formatMoney(value), 'Equity']}
+                        formatter={(value: number, name: string) => {
+                          if (name === 'equity') return [formatMoney(value), isMonteCarlo ? 'Median Equity' : 'Equity'];
+                          if (name === 'worstCase') return [formatMoney(value), '5th Percentile (Worst)'];
+                          if (name === 'bestCase') return [formatMoney(value), '95th Percentile (Best)'];
+                          return [formatMoney(value), name];
+                        }}
                       />
                       <Line 
                         type="monotone" 
@@ -584,6 +703,26 @@ export default function Backtesting({ bots, stocks, onOptimize, onUpdateBot }: B
                         dot={false}
                         activeDot={{ r: 6, fill: '#10B981', stroke: '#064E3B', strokeWidth: 2 }}
                       />
+                      {result.monteCarlo && (
+                        <>
+                          <Line 
+                            type="monotone" 
+                            dataKey="bestCase" 
+                            stroke="#34D399" 
+                            strokeWidth={1}
+                            strokeDasharray="4 4"
+                            dot={false}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="worstCase" 
+                            stroke="#F87171" 
+                            strokeWidth={1}
+                            strokeDasharray="4 4"
+                            dot={false}
+                          />
+                        </>
+                      )}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

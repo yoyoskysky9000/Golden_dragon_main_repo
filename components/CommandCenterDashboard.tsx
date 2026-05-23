@@ -247,7 +247,7 @@ const CommandCenterDashboard: React.FC<CommandCenterProps> = ({
                               <h3 className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Order Book</h3>
                           </div>
                           <div className="flex-1 overflow-hidden">
-                              <OrderBook currentPrice={selectedStock.price} />
+                              <OrderBook currentPrice={selectedStock.price} symbol={selectedStock.symbol} history={selectedStock.history} />
                           </div>
                       </div>
                   </div>

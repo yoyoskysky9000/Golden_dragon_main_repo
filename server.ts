@@ -502,6 +502,10 @@ Reasoning: ${parsed.reasoning}`;
     ws.on('message', (data) => {
       try {
         const message = JSON.parse(data.toString());
+        if (message.type === 'PING') {
+           ws.send(JSON.stringify({ type: 'PONG', timestamp: message.timestamp }));
+           return;
+        }
         if (message.type === 'PLACE_ORDER') {
            const order = message.order;
            const newOrder = {

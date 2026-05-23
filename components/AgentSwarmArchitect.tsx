@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   Network, BrainCircuit, Database, Cpu, Plus, X, 
   Trash2, Play, GitMerge, FileText, CheckCircle2, ChevronRight, Activity, 
-  Settings, Loader2, Pause, RotateCcw
+  Settings, Loader2, Pause, RotateCcw, LineChart
 } from 'lucide-react';
 import { AIAgent, DataSource, AgentTask, StockData } from '../types';
 import { simulateAgentTraining } from '../services/geminiService';
 import SwarmGraph from './SwarmGraph';
 import AgentChat from './AgentChat';
+import TrainingMetricsChart from './TrainingMetricsChart';
 
 interface Props {
   agents: AIAgent[];
@@ -829,12 +830,25 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-sm font-bold text-white border-b border-gray-800 pb-2 mb-4 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-purple-400" />
-                  Live Memory / Output Stream Simulation
-                </h3>
-                 <div className="bg-black border border-gray-800 rounded-xl p-4 font-mono text-[10px] text-gray-500 h-96 overflow-y-auto">
+              <div className="flex flex-col space-y-6">
+                {selectedAgent.status === 'training' && (
+                  <div>
+                    <h3 className="text-sm font-bold text-white border-b border-gray-800 pb-2 mb-4 flex items-center gap-2">
+                      <LineChart className="w-4 h-4 text-amber-500" />
+                      Training Log (Loss Reduction)
+                    </h3>
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl pt-4 pr-4 pl-0 pb-0 h-48 w-full">
+                      <TrainingMetricsChart isTraining={selectedAgent.status === 'training'} />
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex flex-col flex-1">
+                  <h3 className="text-sm font-bold text-white border-b border-gray-800 pb-2 mb-4 flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-purple-400" />
+                    Live Memory / Output Stream Simulation
+                  </h3>
+                  <div className="bg-black border border-gray-800 rounded-xl p-4 font-mono text-[10px] text-gray-500 flex-1 min-h-[250px] overflow-y-auto">
                     {selectedAgent.status === 'training' ? (
                       <div className="text-amber-500 animate-pulse">
                         &gt; Initiating weights adjustment...<br/>
@@ -852,6 +866,7 @@ export default function AgentSwarmArchitect({ agents, setAgents, dataSources, ta
                       <div>&gt; System completely idle. Awaiting initialization.</div>
                     )}
                  </div>
+                </div>
               </div>
             </div>
           </div>

@@ -413,6 +413,8 @@ function App() {
   const [aiInitialMessage, setAiInitialMessage] = useState<string>('');
   const [botToOptimize, setBotToOptimize] = useState<TradingBot | null>(null);
   const [manualConfirmationOrder, setManualConfirmationOrder] = useState<PendingOrder & { isLive?: boolean, originalOrder?: any } | null>(null);
+  const [wsStatus, setWsStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected');
+  const [wsLatency, setWsLatency] = useState<number | null>(null);
 
   // Hypothetical fetch API for selected stock details
 
@@ -578,6 +580,7 @@ function App() {
     const MAX_BACKOFF = 30000;
     let isConnected = false;
     let isClosing = false; // Prevent logic when explicitly closing on unmount
+    let pingInterval: any;
 
     const connect = () => {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -586,17 +589,27 @@ function App() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        setWsStatus('connected');
         if (!isConnected && currentBackoff > 1000) {
           addNotification('Connection Restored', 'Successfully reconnected to live data feed.', 'success');
         }
         isConnected = true;
         currentBackoff = 1000; // reset
+        
+        // ping loop
+        pingInterval = setInterval(() => {
+           if (wsRef.current && wsRef.current.readyState === 1) {
+              wsRef.current.send(JSON.stringify({ type: 'PING', timestamp: Date.now() }));
+           }
+        }, 2000);
       };
 
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          if (message.type === 'TICK' && message.data) {
+          if (message.type === 'PONG') {
+             setWsLatency(Date.now() - message.timestamp);
+          } else if (message.type === 'TICK' && message.data) {
             setStocks(currentStocks => simulateTick(currentStocks, message.data));
           } else if (message.type === 'ORDER_UPDATE' && message.order) {
             const updatedOrder = message.order;
@@ -657,7 +670,10 @@ function App() {
       };
 
       ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
         if (isClosing) return;
+        setWsStatus('reconnecting');
+        setWsLatency(null);
         
         if (isConnected) {
           addNotification('Connection Lost', 'Live data feed disconnected. Attempting to reconnect...', 'alert');
@@ -1059,6 +1075,34 @@ function App() {
     <div className="flex h-screen w-screen bg-[var(--bg)] text-gray-100 overflow-hidden font-sans relative">
       <div className="absolute inset-0 pointer-events-none cyber-grid z-0"></div>
       
+      {/* WebSocket Status Indicator */}
+      <AnimatePresence>
+        {wsStatus === 'reconnecting' && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="absolute top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-orange-500/90 text-white shadow-xl pointer-events-none"
+          >
+            <Activity className="w-4 h-4 animate-spin" />
+            <span className="text-sm font-semibold tracking-wide uppercase">Reconnecting...</span>
+          </motion.div>
+        )}
+        {wsStatus === 'connected' && wsLatency !== null && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="absolute top-4 right-4 z-50 flex items-center gap-2 px-2 py-1 rounded bg-black/50 border border-gray-800 text-gray-400 shadow-xl pointer-events-none"
+          >
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+            <span className="text-[10px] font-mono tracking-wide">
+               {wsLatency}ms
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Toast Notifications */}
       <div className="absolute bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
           {notifications.map(note => (
@@ -1349,7 +1393,11 @@ function App() {
             ) : activeView === AppView.MASTER_BOT ? (
                 <MasterBotView bots={bots} dataSources={effectiveDataSources} />
             ) : activeView === AppView.STRATEGY_EXPLORER ? (
-                <StrategyExplorer stocks={stocks} />
+                <StrategyExplorer stocks={stocks} onDeployBot={(b) => {
+                  setBots(prev => [...prev, b]);
+                  setActiveView(AppView.BOTS);
+                  addNotification('Strategy Deployed', `Successfully deployed to BotLab: ${b.name}`, 'success');
+                }} />
             ) : activeView === AppView.ALPHA_DEEP_DIVE ? (
                 <AlphaDeepDive stocks={stocks} onAddBot={(b) => setBots(prev => [...prev, b])} />
             ) : activeView === AppView.DEEP_SEARCH ? (

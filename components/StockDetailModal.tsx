@@ -461,7 +461,7 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({
                     <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase mb-2">
                         <Layers className="w-3 h-3 text-amber-500" /> Market Depth (L2)
                     </div>
-                    <OrderBook currentPrice={stock.price} />
+                    <OrderBook currentPrice={stock.price} symbol={stock.symbol} history={stock.history} />
                  </div>
 
                  <div className="grid grid-cols-2 gap-3 content-start flex-1">
